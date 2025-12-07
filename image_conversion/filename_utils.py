@@ -54,6 +54,47 @@ class FilenameManager:
         self.used_filenames.add(filename)
         return filename
 
+    def is_valid_video_format(self, filename: str) -> bool:
+        """Check if filename follows VID_<yyyymmdd>_<hhmmss>.mp4 format.
+
+        Args:
+            filename: The filename to check (without path)
+
+        Returns:
+            bool: True if filename matches the format, False otherwise
+        """
+        from config import VIDEO_FILENAME_PATTERN
+        return bool(re.match(VIDEO_FILENAME_PATTERN, filename))
+
+    def generate_video_filename(self, dt: datetime | None, source_name: str) -> str:
+        """Generate filename in format VID_<yyyymmdd>_<hhmmss>.mp4 with deduplication.
+
+        Args:
+            dt: datetime object from video metadata, or None
+            source_name: original filename for fallback
+
+        Returns:
+            str: Generated filename
+        """
+        if dt:
+            base_name = f"VID_{dt.strftime('%Y%m%d_%H%M%S')}"
+        else:
+            # Fallback to timestamp-based name if no metadata
+            base_name = f"VID_{datetime.now().strftime('%Y%m%d_%H%M%S')}_nometa"
+
+        filename = f"{base_name}.mp4"
+
+        # Handle duplicates by checking the set of already-used filenames for this run
+        if filename in self.used_filenames:
+            counter = 1
+            while f"{base_name}-{counter}.mp4" in self.used_filenames:
+                counter += 1
+            filename = f"{base_name}-{counter}.mp4"
+
+        # Record filename as used for this run
+        self.used_filenames.add(filename)
+        return filename
+
     def determine_output_filename(self, source_path: Path, dt: datetime | None) -> str:
         """Determine the appropriate output filename based on source and format rules.
 
@@ -64,15 +105,18 @@ class FilenameManager:
         Returns:
             str: The output filename to use
         """
-        source_lower = source_path.name.lower()
+        # Always generate new filename based on datetime metadata
+        return self.generate_filename(dt, source_path.name)
 
-        # Check if filename follows the required format (handles both .jpg and .jpeg)
-        if self.is_valid_format(source_path.name):
-            # Already follows format, keep the name
-            return source_path.name
-        elif source_lower.endswith(".jpeg") and self.is_valid_format(source_path.stem + ".jpg"):
-            # It's .jpeg but would be valid as .jpg, convert extension
-            return source_path.stem + ".jpg"
-        else:
-            # Doesn't follow format, generate new filename
-            return self.generate_filename(dt, source_path.name)
+    def determine_video_output_filename(self, source_path: Path, dt: datetime | None) -> str:
+        """Determine the appropriate output filename for videos.
+
+        Args:
+            source_path: Path to the source video file
+            dt: datetime object from video metadata, or None
+
+        Returns:
+            str: The output filename to use
+        """
+        # Always generate new filename based on datetime metadata
+        return self.generate_video_filename(dt, source_path.name)

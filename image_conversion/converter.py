@@ -1,6 +1,7 @@
 """Image and video conversion and processing logic."""
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from tqdm import tqdm
@@ -31,13 +32,23 @@ class ImageConverter:
         """
         self.filename_manager = filename_manager
 
-    def convert_to_jpeg(self, source_path: Path) -> None:
+    def convert_to_jpeg(self, source_path: Path, current: int = 0, total: int = 0) -> None:
         """Convert any image format to JPEG with datetime-based filename.
 
         Args:
             source_path: Path to the source image file
+            current: Current file number (for progress display)
+            total: Total number of files (for progress display)
         """
         try:
+            # Check if filename contains double underscore - just copy if it does
+            if "__" in source_path.name:
+                destination_path = DESTINATION_FOLDER / source_path.name
+                shutil.copy2(source_path, destination_path)
+                counter_str = f"[{current}/{total}] " if total > 0 else ""
+                print(f"{counter_str}→ Copied {source_path.name} (contains __)")
+                return
+
             with Image.open(source_path) as original_img:
                 # Preserve EXIF orientation data
                 # This ensures the image is displayed in the correct orientation
@@ -62,19 +73,26 @@ class ImageConverter:
                 )
 
             # Print result
+            counter_str = f"[{current}/{total}] " if total > 0 else ""
             if source_path.name != new_filename:
-                print(f"✓ Converted {source_path.name} → {new_filename}")
+                print(f"{counter_str}✓ Converted {source_path.name} → {new_filename}")
             else:
-                print(f"✓ Processed {source_path.name} (already in correct format)")
+                print(f"{counter_str}✓ Processed {source_path.name} (already in correct format)")
         except Exception as e:
-            print(f"✗ Failed to convert {source_path.name}: {e}")
+            counter_str = f"[{current}/{total}] " if total > 0 else ""
+            print(f"{counter_str}✗ Failed to convert {source_path.name}: {e}")
 
 
 class VideoConverter:
     """Handles video conversion to MP4 format."""
 
-    def __init__(self):
-        """Initialize the video converter."""
+    def __init__(self, filename_manager: FilenameManager):
+        """Initialize the video converter.
+
+        Args:
+            filename_manager: FilenameManager instance for handling filenames
+        """
+        self.filename_manager = filename_manager
         self._check_ffmpeg()
 
     def _check_ffmpeg(self) -> None:
@@ -121,15 +139,29 @@ class VideoConverter:
         except (subprocess.CalledProcessError, ValueError):
             return 0
 
-    def convert_to_mp4(self, source_path: Path) -> None:
+    def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> None:
         """Convert any video format to MP4 with progress bar.
 
         Args:
             source_path: Path to the source video file
+            current: Current file number (for progress display)
+            total: Total number of files (for progress display)
         """
         try:
-            # Determine output filename (keep same name but change extension to .mp4)
-            output_filename = source_path.stem + ".mp4"
+            # Check if filename contains double underscore - just copy if it does
+            if "__" in source_path.name:
+                destination_path = DESTINATION_FOLDER / source_path.name
+                shutil.copy2(source_path, destination_path)
+                print(f"➔ Copied {source_path.name} (contains __)")
+                return
+
+            # Get video metadata
+            from exif_utils import get_video_datetime
+
+            dt, datetime_display = get_video_datetime(source_path)
+
+            # Determine output filename using datetime
+            output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
 
             # Get video duration for progress tracking
@@ -159,9 +191,10 @@ class VideoConverter:
             ]
 
             # Initialize progress bar
+            counter_str = f"[{current}/{total}] " if total > 0 else ""
             pbar = tqdm(
                 total=100,
-                desc=f"Converting {source_path.name}",
+                desc=f"{counter_str}Converting {source_path.name}",
                 unit="%",
                 bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}% [{elapsed}<{remaining}]",
             )
@@ -178,14 +211,22 @@ class VideoConverter:
             current_time = 0
             for line in process.stdout:
                 if line.startswith("out_time_ms="):
-                    # Extract current time in microseconds
-                    time_ms = int(line.split("=")[1].strip())
-                    current_time = time_ms / 1_000_000  # Convert to seconds
+                    try:
+                        # Extract current time in microseconds
+                        time_str = line.split("=")[1].strip()
+                        # Skip if value is N/A or not numeric
+                        if time_str == "N/A" or not time_str.lstrip("-").isdigit():
+                            continue
+                        time_ms = int(time_str)
+                        current_time = time_ms / 1_000_000  # Convert to seconds
 
-                    if duration > 0:
-                        progress = min(100, (current_time / duration) * 100)
-                        pbar.n = int(progress)
-                        pbar.refresh()
+                        if duration > 0:
+                            progress = min(100, (current_time / duration) * 100)
+                            pbar.n = int(progress)
+                            pbar.refresh()
+                    except (ValueError, IndexError):
+                        # Skip lines with invalid format
+                        continue
 
             # Wait for process to complete
             process.wait()
@@ -193,13 +234,20 @@ class VideoConverter:
             pbar.refresh()
             pbar.close()
 
+            counter_str = f"[{current}/{total}] " if total > 0 else ""
             if process.returncode == 0:
-                print(f"✓ Converted {source_path.name} → {output_filename}")
+                print(f"{counter_str}✓ Converted {source_path.name} → {output_filename}")
             else:
-                stderr = process.stderr.read()
-                print(f"✗ Failed to convert {source_path.name}: {stderr}")
+                # Read any remaining stderr
+                if process.stderr:
+                    stderr = process.stderr.read()
+                    print(f"{counter_str}✗ Failed to convert {source_path.name}: {stderr}")
+                else:
+                    print(f"{counter_str}✗ Failed to convert {source_path.name}")
 
         except subprocess.CalledProcessError as e:
-            print(f"✗ Failed to convert {source_path.name}: {e.stderr}")
+            counter_str = f"[{current}/{total}] " if total > 0 else ""
+            print(f"{counter_str}✗ Failed to convert {source_path.name}: {e.stderr}")
         except Exception as e:
-            print(f"✗ Failed to convert {source_path.name}: {e}")
+            counter_str = f"[{current}/{total}] " if total > 0 else ""
+            print(f"{counter_str}✗ Failed to convert {source_path.name}: {e}")

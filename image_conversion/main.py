@@ -51,21 +51,22 @@ def main() -> None:
     total_files = len(image_files) + len(video_files)
     print(f"Found {len(image_files)} image file(s) and {len(video_files)} video file(s) to convert\n")
 
+    filename_manager = FilenameManager()
+    
     # Process images
     if image_files:
         print("=== Processing Images ===")
-        filename_manager = FilenameManager()
         image_converter = ImageConverter(filename_manager)
-        for source_file in image_files:
-            image_converter.convert_to_jpeg(source_file)
+        for idx, source_file in enumerate(image_files, 1):
+            image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
         print()
 
     # Process videos
     if video_files:
         print("=== Processing Videos ===")
-        video_converter = VideoConverter()
-        for source_file in video_files:
-            video_converter.convert_to_mp4(source_file)
+        video_converter = VideoConverter(filename_manager)
+        for idx, source_file in enumerate(video_files, 1):
+            video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
         print()
 
     print(f"Conversion complete!")

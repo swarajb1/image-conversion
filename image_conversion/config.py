@@ -10,7 +10,7 @@ DESTINATION_FOLDER = Path("files/converted")
 IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
 
 # Supported video formats
-VIDEO_EXTENSIONS = ["mov", "avi", "mkv", "flv", "wmv"]
+VIDEO_EXTENSIONS = ["mov", "mp4", "avi", "mkv", "flv", "wmv"]
 
 # JPEG quality settings
 JPEG_QUALITY = 95
@@ -26,3 +26,7 @@ AUDIO_BITRATE = "320k"  # High quality audio bitrate (320k = near CD quality)
 # Filename pattern for valid image names
 # Format: IMG_YYYYMMDD_HHMMSS.jpg (with optional -1, -2 suffix)
 FILENAME_PATTERN = r"^IMG_\d{8}_\d{6}(-\d+)?\.jpg$"
+
+# Filename pattern for valid video names
+# Format: VID_YYYYMMDD_HHMMSS.mp4 (with optional -1, -2 suffix)
+VIDEO_FILENAME_PATTERN = r"^VID_\d{8}_\d{6}(-\d+)?\.mp4$"
