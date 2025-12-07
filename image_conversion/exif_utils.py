@@ -2,10 +2,11 @@
 
 import json
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from PIL import Image
 from PIL.ExifTags import TAGS
+from config import IST
 
 
 def get_video_datetime(video_path: Path) -> tuple[datetime | None, str]:
@@ -20,8 +21,10 @@ def get_video_datetime(video_path: Path) -> tuple[datetime | None, str]:
     try:
         command = [
             "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
             str(video_path),
@@ -38,15 +41,32 @@ def get_video_datetime(video_path: Path) -> tuple[datetime | None, str]:
         if "format" in metadata and "tags" in metadata["format"]:
             tags = metadata["format"]["tags"]
             # Common metadata fields for creation time
-            for key in ["creation_time", "com.apple.quicktime.creationdate", "date"]:
+            for key in ["com.apple.quicktime.creationdate", "creation_time", "date"]:
                 if key in tags:
                     try:
                         # Parse ISO 8601 format (most common)
                         dt_str = tags[key]
+                        is_utc = dt_str.endswith("Z")
+                        # Remove 'Z' timezone indicator for parsing
+                        dt_str = dt_str.replace("Z", "").strip()
                         # Handle different datetime formats
-                        for fmt in ["%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S"]:
+                        for fmt in [
+                            "%Y-%m-%dT%H:%M:%S.%f%z",
+                            "%Y-%m-%dT%H:%M:%S%z",
+                            "%Y-%m-%dT%H:%M:%S.%f",
+                            "%Y-%m-%dT%H:%M:%S",
+                            "%Y-%m-%d %H:%M:%S",
+                        ]:
                             try:
-                                dt = datetime.strptime(dt_str.split(".")[0].replace("Z", ""), fmt.replace(".%f", "").replace("Z", ""))
+                                dt = datetime.strptime(dt_str, fmt)
+                                # If the original string had 'Z', it's UTC time - convert to IST
+                                if is_utc:
+                                    utc_tz = timezone.utc
+                                    dt_utc = dt.replace(tzinfo=utc_tz)
+                                    dt = dt_utc.astimezone(IST)
+                                # If datetime already has timezone info, convert to IST
+                                elif dt.tzinfo is not None:
+                                    dt = dt.astimezone(IST)
                                 formatted = dt.strftime("%B %d, %Y at %I:%M:%S %p")
                                 return dt, formatted
                             except ValueError:

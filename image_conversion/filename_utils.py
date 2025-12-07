@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import DESTINATION_FOLDER, FILENAME_PATTERN
+from config import DESTINATION_FOLDER, FILENAME_PATTERN, DATETIME_ONLY_PATTERN
 
 
 class FilenameManager:
@@ -24,6 +24,17 @@ class FilenameManager:
             bool: True if filename matches the format, False otherwise
         """
         return bool(re.match(FILENAME_PATTERN, filename))
+
+    def is_datetime_only_format(self, filename: str) -> bool:
+        """Check if filename follows <yyyymmdd>_<hhmmss>.jpg/mp4 format (without prefix).
+
+        Args:
+            filename: The filename to check (without path)
+
+        Returns:
+            bool: True if filename matches the datetime-only format, False otherwise
+        """
+        return bool(re.match(DATETIME_ONLY_PATTERN, filename, re.IGNORECASE))
 
     def generate_filename(self, dt: datetime | None, source_name: str) -> str:
         """Generate filename in format IMG_<yyyymmdd>_<hhmmss>.jpg with deduplication.
@@ -64,6 +75,7 @@ class FilenameManager:
             bool: True if filename matches the format, False otherwise
         """
         from config import VIDEO_FILENAME_PATTERN
+
         return bool(re.match(VIDEO_FILENAME_PATTERN, filename))
 
     def generate_video_filename(self, dt: datetime | None, source_name: str) -> str:
@@ -105,6 +117,14 @@ class FilenameManager:
         Returns:
             str: The output filename to use
         """
+        # Check if filename is in datetime-only format (e.g., "20251207_175000.jpg")
+        if self.is_datetime_only_format(source_path.name):
+            # Add IMG_ prefix to the existing filename
+            stem = source_path.stem  # e.g., "20251207_175000"
+            new_filename = f"IMG_{stem}.jpg"
+            self.used_filenames.add(new_filename)
+            return new_filename
+
         # Always generate new filename based on datetime metadata
         return self.generate_filename(dt, source_path.name)
 
@@ -118,5 +138,13 @@ class FilenameManager:
         Returns:
             str: The output filename to use
         """
+        # Check if filename is in datetime-only format (e.g., "20251207_175000.mp4")
+        if self.is_datetime_only_format(source_path.name):
+            # Add VID_ prefix to the existing filename
+            stem = source_path.stem  # e.g., "20251207_175000"
+            new_filename = f"VID_{stem}.mp4"
+            self.used_filenames.add(new_filename)
+            return new_filename
+
         # Always generate new filename based on datetime metadata
         return self.generate_video_filename(dt, source_path.name)

@@ -43,7 +43,7 @@ class ImageConverter:
         try:
             # Process files by determining filename based on datetime format
             destination_path = DESTINATION_FOLDER / source_path.name
-            
+
             with Image.open(source_path) as original_img:
                 # Preserve EXIF orientation data for correct display
                 img = ImageOps.exif_transpose(original_img)
@@ -55,13 +55,13 @@ class ImageConverter:
 
                 # Check if source filename already follows the datetime format
                 # If it does, keep the same name but strip metadata
-                # Otherwise, generate a new filename based on datetime
+                # Otherwise, generate a new filename based on datetime or convert datetime-only format
                 source_stem = source_path.stem
                 if self.filename_manager.is_valid_format(source_path.name):
                     # Source already has correct format - keep the name, strip metadata
                     new_filename = source_path.name
                 else:
-                    # Generate new filename based on datetime
+                    # Generate new filename based on datetime or convert datetime-only format
                     new_filename = self.filename_manager.determine_output_filename(source_path, dt)
                 destination_path = DESTINATION_FOLDER / new_filename
 
@@ -70,9 +70,7 @@ class ImageConverter:
                     img = img.convert("RGB")
 
                 # Save without any metadata (only the image data)
-                img.save(
-                    destination_path, format="JPEG", quality=JPEG_QUALITY, optimize=JPEG_OPTIMIZE
-                )
+                img.save(destination_path, format="JPEG", quality=JPEG_QUALITY, optimize=JPEG_OPTIMIZE)
 
             # Print result
             counter_str = f"[{current}/{total}] " if total > 0 else ""
@@ -157,12 +155,12 @@ class VideoConverter:
 
             # Check if source filename already follows the datetime format
             # If it does, keep the same name but strip metadata
-            # Otherwise, generate a new filename based on datetime
+            # Otherwise, generate a new filename based on datetime or convert datetime-only format
             if self.filename_manager.is_valid_video_format(source_path.name):
                 # Source already has correct format - keep the name, strip metadata
                 output_filename = source_path.name
             else:
-                # Generate new filename based on datetime
+                # Generate new filename based on datetime or convert datetime-only format
                 output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
 
@@ -174,7 +172,8 @@ class VideoConverter:
                 "ffmpeg",
                 "-i",
                 str(source_path),
-                "-map_metadata", "-1",  # Strip all metadata
+                "-map_metadata",
+                "-1",  # Strip all metadata
                 "-c:v",
                 VIDEO_CODEC,
                 "-crf",
