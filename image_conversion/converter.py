@@ -41,17 +41,11 @@ class ImageConverter:
             total: Total number of files (for progress display)
         """
         try:
-            # Check if filename contains double underscore - just copy if it does
-            if "__" in source_path.name:
-                destination_path = DESTINATION_FOLDER / source_path.name
-                shutil.copy2(source_path, destination_path)
-                counter_str = f"[{current}/{total}] " if total > 0 else ""
-                print(f"{counter_str}→ Copied {source_path.name} (contains __)")
-                return
-
+            # Process files by determining filename based on datetime format
+            destination_path = DESTINATION_FOLDER / source_path.name
+            
             with Image.open(source_path) as original_img:
-                # Preserve EXIF orientation data
-                # This ensures the image is displayed in the correct orientation
+                # Preserve EXIF orientation data for correct display
                 img = ImageOps.exif_transpose(original_img)
                 if img is None:
                     img = original_img
@@ -59,17 +53,25 @@ class ImageConverter:
                 # Get datetime and display string
                 dt, datetime_display = get_image_datetime(img)
 
-                # Determine output filename
-                new_filename = self.filename_manager.determine_output_filename(source_path, dt)
+                # Check if source filename already follows the datetime format
+                # If it does, keep the same name but strip metadata
+                # Otherwise, generate a new filename based on datetime
+                source_stem = source_path.stem
+                if self.filename_manager.is_valid_format(source_path.name):
+                    # Source already has correct format - keep the name, strip metadata
+                    new_filename = source_path.name
+                else:
+                    # Generate new filename based on datetime
+                    new_filename = self.filename_manager.determine_output_filename(source_path, dt)
                 destination_path = DESTINATION_FOLDER / new_filename
 
                 # Convert to RGB if necessary (images can have different color modes)
                 if img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
 
-                # Save with EXIF data preserved (including orientation)
+                # Save without any metadata (only the image data)
                 img.save(
-                    destination_path, format="JPEG", quality=JPEG_QUALITY, optimize=JPEG_OPTIMIZE, exif=img.getexif()
+                    destination_path, format="JPEG", quality=JPEG_QUALITY, optimize=JPEG_OPTIMIZE
                 )
 
             # Print result
@@ -148,20 +150,20 @@ class VideoConverter:
             total: Total number of files (for progress display)
         """
         try:
-            # Check if filename contains double underscore - just copy if it does
-            if "__" in source_path.name:
-                destination_path = DESTINATION_FOLDER / source_path.name
-                shutil.copy2(source_path, destination_path)
-                print(f"➔ Copied {source_path.name} (contains __)")
-                return
-
             # Get video metadata
             from exif_utils import get_video_datetime
 
             dt, datetime_display = get_video_datetime(source_path)
 
-            # Determine output filename using datetime
-            output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
+            # Check if source filename already follows the datetime format
+            # If it does, keep the same name but strip metadata
+            # Otherwise, generate a new filename based on datetime
+            if self.filename_manager.is_valid_video_format(source_path.name):
+                # Source already has correct format - keep the name, strip metadata
+                output_filename = source_path.name
+            else:
+                # Generate new filename based on datetime
+                output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
 
             # Get video duration for progress tracking
@@ -172,6 +174,7 @@ class VideoConverter:
                 "ffmpeg",
                 "-i",
                 str(source_path),
+                "-map_metadata", "-1",  # Strip all metadata
                 "-c:v",
                 VIDEO_CODEC,
                 "-crf",

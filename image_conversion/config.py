@@ -24,9 +24,9 @@ AUDIO_CODEC = "aac"  # AAC audio codec
 AUDIO_BITRATE = "320k"  # High quality audio bitrate (320k = near CD quality)
 
 # Filename pattern for valid image names
-# Format: IMG_YYYYMMDD_HHMMSS.jpg (with optional -1, -2 suffix)
-FILENAME_PATTERN = r"^IMG_\d{8}_\d{6}(-\d+)?\.jpg$"
+# Format: IMG_YYYYMMDD_HHMMSS.jpg or IMG_YYYYMMDD_HHMMSS_noexif.jpg (with optional -1, -2 suffix)
+FILENAME_PATTERN = r"^IMG_\d{8}_\d{6}(_noexif)?(-\d+)?\.jpg$"
 
 # Filename pattern for valid video names
-# Format: VID_YYYYMMDD_HHMMSS.mp4 (with optional -1, -2 suffix)
-VIDEO_FILENAME_PATTERN = r"^VID_\d{8}_\d{6}(-\d+)?\.mp4$"
+# Format: VID_YYYYMMDD_HHMMSS.mp4 or VID_YYYYMMDD_HHMMSS_nometa.mp4 (with optional -1, -2 suffix)
+VIDEO_FILENAME_PATTERN = r"^VID_\d{8}_\d{6}(_nometa)?(-\d+)?\.mp4$"
