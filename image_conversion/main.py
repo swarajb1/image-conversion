@@ -3,7 +3,8 @@
 import pillow_heif
 
 from config import SOURCE_FOLDER, DESTINATION_FOLDER, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from converter import ImageConverter, VideoConverter
+from image_converter import ImageConverter
+from video_converter import VideoConverter
 from filename_utils import FilenameManager
 
 
@@ -52,7 +53,7 @@ def main() -> None:
     print(f"Found {len(image_files)} image file(s) and {len(video_files)} video file(s) to convert\n")
 
     filename_manager = FilenameManager()
-    
+
     # Process images
     if image_files:
         print("=== Processing Images ===")
