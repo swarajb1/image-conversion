@@ -1,0 +1,43 @@
+# .pre-commit-config.yaml
+repos:
+    # General hooks (whitespace, end-of-file, etc.) - often run first
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v6.0.0
+      hooks:
+          - id: trailing-whitespace
+          - id: end-of-file-fixer
+          - id: check-yaml
+          - id: check-added-large-files
+          - id: check-case-conflict
+          - id: check-merge-conflict
+          - id: detect-private-key
+            verbose: true
+
+    # Python code formatting
+    - repo: https://github.com/psf/black
+      rev: 25.1.0
+      hooks:
+          - id: black
+            args: ["-l", "119"]
+            verbose: true
+
+    # # Python import sorting
+    # - repo: https://github.com/PyCQA/isort
+    #   rev: 6.0.1
+    #   hooks:
+    #       - id: isort
+    #         name: isort (Python)
+    #         args: ["--profile", "black"]
+    #         verbose: true
+
+    # - repo: https://github.com/PyCQA/autoflake
+    #   rev: v2.3.1
+    #   hooks:
+    #       - id: autoflake
+    #         args: [
+    #                 "-r",
+    #                 "-i",
+    #                 "--remove-all-unused-imports",
+    #                 # "--remove-unused-variables",
+    #             ]
+    #         verbose: true
