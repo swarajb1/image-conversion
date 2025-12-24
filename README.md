@@ -18,7 +18,7 @@ A production-ready Python batch converter for images and videos with intelligent
 - **Real-time Progress**: Live progress bars with time estimates during conversion
 - **Metadata Stripping**: Removes all metadata for privacy
 - **Streaming Optimization**: Fast-start enabled for web streaming
-- **High-Quality Output**: CRF 18 visually lossless encoding with 320k audio
+- **High-Quality Output**: CRF 18 visually lossless encoding with 256k audio
 
 ### Timezone Support
 - **IST Conversion**: Automatic conversion from UTC (Z indicator) to Indian Standard Time (UTC+5:30)
@@ -161,7 +161,7 @@ VIDEO_CODEC = "libx264"     # H.264 codec (recommended for compatibility)
 VIDEO_QUALITY = "18"        # CRF 0-51 (18 = visually lossless)
 VIDEO_PRESET = "slow"       # Speed: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
 AUDIO_CODEC = "aac"         # AAC audio codec
-AUDIO_BITRATE = "320k"      # Audio quality (320k = near CD quality)
+AUDIO_BITRATE = "256k"      # Audio quality (256k = near CD quality)
 ```
 
 ### Timezone Settings
@@ -345,7 +345,7 @@ Supports timezone formats:
 - **Quality**: CRF 18 (visually lossless)
 - **Preset**: slow (best compression)
 - **Audio Codec**: AAC
-- **Audio Bitrate**: 320k (near CD quality)
+- **Audio Bitrate**: 256k (near CD quality)
 - **Streaming**: Fast-start enabled
 - **Metadata**: None (stripped for privacy)
 

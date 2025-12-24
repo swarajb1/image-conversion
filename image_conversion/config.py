@@ -25,7 +25,7 @@ VIDEO_CODEC = "libx264"  # H.264 codec for MP4
 VIDEO_QUALITY = "18"  # CRF value (18 = visually lossless, lower = better quality)
 VIDEO_PRESET = "slow"  # Encoding speed preset (slower = better compression)
 AUDIO_CODEC = "aac"  # AAC audio codec
-AUDIO_BITRATE = "320k"  # High quality audio bitrate (320k = near CD quality)
+AUDIO_BITRATE = "256k"  # High quality audio bitrate 
 
 # Filename pattern for valid image names
 # Format: IMG_YYYYMMDD_HHMMSS.jpg or IMG_YYYYMMDD_HHMMSS_noexif.jpg (with optional -1, -2 suffix)
