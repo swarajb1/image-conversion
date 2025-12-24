@@ -65,6 +65,72 @@ class VideoConverter:
         except (subprocess.CalledProcessError, ValueError):
             return 0
 
+    def _get_audio_bitrate(self, source_path: Path) -> str:
+        """Get the audio bitrate of a video file.
+
+        Args:
+            source_path: Path to the video file
+
+        Returns:
+            Audio bitrate as a string (e.g., "128000"), or "0" if unable to determine
+        """
+        try:
+            command = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=bit_rate",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(source_path),
+            ]
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            bitrate = result.stdout.decode().strip()
+            return bitrate if bitrate else "0"
+        except (subprocess.CalledProcessError, ValueError):
+            return "0"
+
+    def _get_video_quality(self, source_path: Path) -> str:
+        """Get the video quality (resolution) of a video file.
+
+        Args:
+            source_path: Path to the video file
+
+        Returns:
+            Video quality as a string (e.g., "1920x1080"), or "Unknown" if unable to determine
+        """
+        try:
+            command = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
+                str(source_path),
+            ]
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            quality = result.stdout.decode().strip()
+            return quality if quality else "Unknown"
+        except (subprocess.CalledProcessError, ValueError):
+            return "Unknown"
+
     def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> None:
         """Convert any video format to MP4 with progress bar.
 
@@ -91,6 +157,11 @@ class VideoConverter:
             # Get video duration for progress tracking
             duration = self._get_video_duration(source_path)
 
+            # Get audio bitrate from source, use default if not available
+            audio_bitrate = self._get_audio_bitrate(source_path)
+            if audio_bitrate == "0":
+                audio_bitrate = AUDIO_BITRATE
+
             # Run ffmpeg conversion
             command = [
                 "ffmpeg",
@@ -107,7 +178,7 @@ class VideoConverter:
                 "-c:a",
                 AUDIO_CODEC,
                 "-b:a",
-                AUDIO_BITRATE,
+                audio_bitrate,
                 "-movflags",
                 "+faststart",  # Enable streaming
                 "-progress",
