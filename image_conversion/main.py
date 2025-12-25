@@ -1,9 +1,13 @@
 """Main entry point for the image and video conversion application."""
 
+import argparse
+import sys
 import pillow_heif
 
 from config import SOURCE_FOLDER, DESTINATION_FOLDER, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from image_converter import ImageConverter
+from pyvips_converter import PyVipsImageConverter
+
+# from image_converter import ImageConverter
 from video_converter import VideoConverter
 from filename_utils import FilenameManager
 
@@ -15,8 +19,53 @@ pillow_heif.register_heif_opener()
 DESTINATION_FOLDER.mkdir(parents=True, exist_ok=True)
 
 
+def parse_arguments() -> argparse.Namespace:
+    """Parse and validate command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments with validated values.
+
+    Raises:
+        SystemExit: If arguments are invalid (argparse handles this automatically).
+    """
+    parser = argparse.ArgumentParser(
+        prog="image-conversion",
+        description="Convert image and video files to JPEG and MP4 formats with optional Samsung image renaming.",
+        epilog="Example usage:\n  python main.py                      # Convert all files\n  python main.py --samsung-rename     # Rename Samsung images only\n  python main.py --help               # Show this help message",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--samsung-rename",
+        action="store_true",
+        help="Rename Samsung images only without performing conversion (useful for organizing Samsung JPEG files)",
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 1.0.0",
+        help="Show program version",
+    )
+
+    args = parser.parse_args()
+    return args
+
+
 def main() -> None:
     """Main function to process all image and video files in the source folder."""
+    # Parse and validate command-line arguments
+    try:
+        args = parse_arguments()
+    except SystemExit as e:
+        if e.code != 0:
+            sys.exit(e.code)
+        sys.exit(0)
+
+    samsung_rename_only = args.samsung_rename
+    if samsung_rename_only:
+        print("Mode: Samsung images will be renamed only (no conversion)\n")
+
     if not SOURCE_FOLDER.exists():
         print(f"Error: Source folder '{SOURCE_FOLDER}' does not exist")
         return
@@ -57,7 +106,7 @@ def main() -> None:
     # Process images
     if image_files:
         print("=== Processing Images ===")
-        image_converter = ImageConverter(filename_manager)
+        image_converter = PyVipsImageConverter(filename_manager, samsung_rename_only=samsung_rename_only)
         for idx, source_file in enumerate(image_files, 1):
             image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
         print()

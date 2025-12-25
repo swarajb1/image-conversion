@@ -17,7 +17,7 @@ IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
 VIDEO_EXTENSIONS = ["mov", "mp4", "avi", "mkv", "flv", "wmv"]
 
 # JPEG quality settings
-JPEG_QUALITY = 90  # Quality level (1-100, recommended: 90 for good quality with compression)
+JPEG_QUALITY = 95  # Quality level (1-100, recommended: 90 for good quality with compression)
 JPEG_OPTIMIZE = True
 
 # Video conversion settings
@@ -25,7 +25,7 @@ VIDEO_CODEC = "libx264"  # H.264 codec for MP4
 VIDEO_QUALITY = "18"  # CRF value (18 = visually lossless, lower = better quality)
 VIDEO_PRESET = "slow"  # Encoding speed preset (slower = better compression)
 AUDIO_CODEC = "aac"  # AAC audio codec
-AUDIO_BITRATE = "256k"  # High quality audio bitrate 
+AUDIO_BITRATE = "256k"  # High quality audio bitrate
 
 # Filename pattern for valid image names
 # Format: IMG_YYYYMMDD_HHMMSS.jpg or IMG_YYYYMMDD_HHMMSS_noexif.jpg (with optional -1, -2 suffix)

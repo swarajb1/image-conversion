@@ -100,3 +100,24 @@ def get_image_datetime(img: Image.Image) -> tuple[datetime | None, str]:
     except Exception:
         pass
     return None, "Unknown"
+
+
+def is_samsung_device(img: Image.Image) -> bool:
+    """Check if image is from a Samsung device by examining EXIF make and model tags.
+
+    Args:
+        img: PIL Image object
+
+    Returns:
+        bool: True if image is from Samsung device, False otherwise
+    """
+    try:
+        exif = img.getexif()
+        if exif:
+            make = exif.get(271, "")  # Make tag
+            model = exif.get(272, "")  # Model tag
+            if "samsung" in str(make).lower() or "samsung" in str(model).lower():
+                return True
+    except Exception:
+        pass
+    return False
