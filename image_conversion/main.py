@@ -1,5 +1,6 @@
 """Main entry point for the image and video conversion application."""
 
+import argparse
 import sys
 import pillow_heif
 
@@ -18,10 +19,50 @@ pillow_heif.register_heif_opener()
 DESTINATION_FOLDER.mkdir(parents=True, exist_ok=True)
 
 
+def parse_arguments() -> argparse.Namespace:
+    """Parse and validate command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments with validated values.
+
+    Raises:
+        SystemExit: If arguments are invalid (argparse handles this automatically).
+    """
+    parser = argparse.ArgumentParser(
+        prog="image-conversion",
+        description="Convert image and video files to JPEG and MP4 formats with optional Samsung image renaming.",
+        epilog="Example usage:\n  python main.py                      # Convert all files\n  python main.py --samsung-rename     # Rename Samsung images only\n  python main.py --help               # Show this help message",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--samsung-rename",
+        action="store_true",
+        help="Rename Samsung images only without performing conversion (useful for organizing Samsung JPEG files)",
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 1.0.0",
+        help="Show program version",
+    )
+
+    args = parser.parse_args()
+    return args
+
+
 def main() -> None:
     """Main function to process all image and video files in the source folder."""
-    # Check for command line arguments
-    samsung_rename_only = "--samsung-rename" in sys.argv
+    # Parse and validate command-line arguments
+    try:
+        args = parse_arguments()
+    except SystemExit as e:
+        if e.code != 0:
+            sys.exit(e.code)
+        sys.exit(0)
+
+    samsung_rename_only = args.samsung_rename
     if samsung_rename_only:
         print("Mode: Samsung images will be renamed only (no conversion)\n")
 

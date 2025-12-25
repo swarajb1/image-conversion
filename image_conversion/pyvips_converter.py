@@ -3,9 +3,10 @@
 from pathlib import Path
 import shutil
 import pyvips
+from PIL import Image
 
 from config import DESTINATION_FOLDER, JPEG_QUALITY
-from exif_utils import get_image_datetime
+from exif_utils import get_image_datetime, is_samsung_device
 from filename_utils import FilenameManager
 
 
@@ -32,25 +33,14 @@ class PyVipsImageConverter:
         """
         try:
             # Get datetime from EXIF data using PIL (for compatibility with existing code)
-            from PIL import Image
 
             with Image.open(source_path) as pil_img:
                 dt, datetime_display = get_image_datetime(pil_img)
 
                 # Check if image is from Samsung
-                is_samsung = False
-                try:
-                    exif = pil_img.getexif()
-                    if exif:
-                        make = exif.get(271, "")  # Make tag
-                        model = exif.get(272, "")  # Model tag
-                        if "samsung" in str(make).lower() or "samsung" in str(model).lower():
-                            is_samsung = True
-                except Exception:
-                    pass
+                is_samsung = is_samsung_device(pil_img)
 
             # Determine output filename
-            source_stem = source_path.stem
             if self.filename_manager.is_valid_format(source_path.name):
                 new_filename = source_path.name
             else:
