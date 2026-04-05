@@ -4,7 +4,15 @@ import subprocess
 from pathlib import Path
 from tqdm import tqdm
 
-from config import DESTINATION_FOLDER, VIDEO_CODEC, VIDEO_QUALITY, VIDEO_PRESET, AUDIO_CODEC, AUDIO_BITRATE
+from config import (
+    DESTINATION_FOLDER,
+    VIDEO_CODEC,
+    VIDEO_QUALITY,
+    VIDEO_PRESET,
+    AUDIO_CODEC,
+    AUDIO_BITRATE,
+    VIDEO_SKIP_REENCODE_MP4,
+)
 from exif_utils import get_video_datetime
 from filename_utils import FilenameManager
 
@@ -155,6 +163,22 @@ class VideoConverter:
                 # Generate new filename based on datetime or convert datetime-only format
                 output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
+
+            # Skip re-encoding for MP4 sources when configured — just copy/rename
+            if VIDEO_SKIP_REENCODE_MP4 and source_path.suffix.lower() == ".mp4":
+                import shutil
+
+                shutil.copy2(source_path, destination_path)
+
+                pad = self.max_name_len
+                total_w = len(str(total))
+                counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
+                if source_path.name != output_filename:
+                    src = source_path.name.ljust(pad)
+                    print(f"{counter_str}✓ Copied    {src} → {output_filename}")
+                else:
+                    print(f"{counter_str}✓ Copied    {source_path.name}")
+                return
 
             # Get video duration for progress tracking
             duration = self._get_video_duration(source_path)
