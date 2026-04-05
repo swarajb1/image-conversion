@@ -102,11 +102,14 @@ def main() -> None:
     print(f"Found {len(image_files)} image file(s) and {len(video_files)} video file(s) to convert\n")
 
     filename_manager = FilenameManager()
+    max_name_len = max((len(f.name) for f in image_files + video_files), default=0)
 
     # Process images
     if image_files:
         print("=== Processing Images ===")
-        image_converter = PyVipsImageConverter(filename_manager, samsung_rename_only=samsung_rename_only)
+        image_converter = PyVipsImageConverter(
+            filename_manager, samsung_rename_only=samsung_rename_only, max_name_len=max_name_len
+        )
         for idx, source_file in enumerate(image_files, 1):
             image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
         print()
@@ -114,7 +117,7 @@ def main() -> None:
     # Process videos
     if video_files:
         print("=== Processing Videos ===")
-        video_converter = VideoConverter(filename_manager)
+        video_converter = VideoConverter(filename_manager, max_name_len=max_name_len)
         for idx, source_file in enumerate(video_files, 1):
             video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
         print()

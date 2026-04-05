@@ -5,7 +5,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from PIL import Image
-from config import IST
+from config import IST, UTC_STORING_MAKES
 
 
 def get_video_datetime(video_path: Path) -> tuple[datetime | None, str]:
@@ -105,6 +105,10 @@ def get_image_datetime(img: Image.Image) -> tuple[datetime | None, str]:
         except Exception:
             exif_ifd = {}
 
+        # Some camera makes (e.g. Canon) store DateTimeOriginal in UTC instead of local time.
+        # For those, OffsetTimeOriginal represents the local timezone offset to apply.
+        make = (exif.get(271) or "").lower()
+
         for dt_tag, offset_tag in PRIORITY_TAGS:
             dt_str = exif_ifd.get(dt_tag) or exif.get(dt_tag)
             if not dt_str:
@@ -113,7 +117,7 @@ def get_image_datetime(img: Image.Image) -> tuple[datetime | None, str]:
             try:
                 dt = datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
 
-                if offset_tag:
+                if offset_tag and make in UTC_STORING_MAKES:
                     offset_str = exif_ifd.get(offset_tag) or exif.get(offset_tag)
                     if offset_str:
                         try:
@@ -123,8 +127,6 @@ def get_image_datetime(img: Image.Image) -> tuple[datetime | None, str]:
                                 hours=sign * int(parts[0]),
                                 minutes=sign * int(parts[1]) if len(parts) > 1 else 0,
                             )
-                            # DateTimeOriginal stores UTC; offset is the local timezone.
-                            # Add offset to UTC to get the correct local time.
                             dt = dt + offset_td
                         except Exception:
                             pass

@@ -13,15 +13,17 @@ from filename_utils import FilenameManager
 class PyVipsImageConverter:
     """Handles image conversion to JPEG using pyvips for better performance."""
 
-    def __init__(self, filename_manager: FilenameManager, samsung_rename_only: bool = False):
+    def __init__(self, filename_manager: FilenameManager, samsung_rename_only: bool = False, max_name_len: int = 0):
         """Initialize the pyvips image converter.
 
         Args:
             filename_manager: FilenameManager instance for handling filenames
             samsung_rename_only: If True, Samsung images are only renamed, not converted
+            max_name_len: Max source filename length used to align terminal output columns
         """
         self.filename_manager = filename_manager
         self.samsung_rename_only = samsung_rename_only
+        self.max_name_len = max_name_len
 
     def _process_with_pyvips(
         self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
@@ -81,16 +83,19 @@ class PyVipsImageConverter:
 
             destination_path = DESTINATION_FOLDER / new_filename
 
+            pad = self.max_name_len
+            total_w = len(str(total))
+            counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
+
             # If Samsung rename-only mode is enabled and image is from Samsung, just copy/rename
             if self.samsung_rename_only and is_samsung:
                 shutil.copy2(source_path, destination_path)
 
-                # Print result
-                counter_str = f"[{current}/{total}] " if total > 0 else ""
                 if source_path.name != new_filename:
-                    print(f"{counter_str}✓ Renamed {source_path.name} → {new_filename} (Samsung, no conversion)")
+                    src = source_path.name.ljust(pad)
+                    print(f"{counter_str}✓ Renamed   {src} → {new_filename} (Samsung, no conversion)")
                 else:
-                    print(f"{counter_str}✓ Copied {source_path.name} (Samsung, no conversion)")
+                    print(f"{counter_str}✓ Copied    {source_path.name} (Samsung, no conversion)")
                 return
 
             # Otherwise, proceed with full conversion
@@ -103,13 +108,13 @@ class PyVipsImageConverter:
                 else:
                     raise
 
-            # Print result
-            counter_str = f"[{current}/{total}] " if total > 0 else ""
             if source_path.name != new_filename:
-                print(f"{counter_str}✓ Converted {source_path.name} → {new_filename}")
+                src = source_path.name.ljust(pad)
+                print(f"{counter_str}✓ Converted {src} → {new_filename}")
             else:
                 print(f"{counter_str}✓ Processed {source_path.name} (already in correct format)")
 
         except Exception as e:
-            counter_str = f"[{current}/{total}] " if total > 0 else ""
-            print(f"{counter_str}✗ Failed to convert {source_path.name}: {e}")
+            total_w = len(str(total))
+            counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
+            print(f"{counter_str}✗ Failed    {source_path.name}: {e}")
