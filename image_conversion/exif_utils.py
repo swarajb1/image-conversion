@@ -2,10 +2,9 @@
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from PIL import Image
-from PIL.ExifTags import TAGS
 from config import IST
 
 
@@ -87,18 +86,56 @@ def get_image_datetime(img: Image.Image) -> tuple[datetime | None, str]:
     Returns:
         tuple: (datetime object or None, formatted string for display)
     """
+    # Priority order: (datetime_tag_id, offset_tag_id)
+    # DateTimeOriginal/Digitized live in ExifIFD (sub-IFD 0x8769), not the main IFD.
+    # DateTime (306) is in the main IFD and represents last-modified time — used as fallback only.
+    PRIORITY_TAGS = [
+        (36867, 36881),  # DateTimeOriginal + OffsetTimeOriginal
+        (36868, 36882),  # DateTimeDigitized + OffsetTimeDigitized
+        (306, None),     # DateTime (main IFD, last resort)
+    ]
+
     try:
-        exif_data = img.getexif()
-        if exif_data:
-            for tag_id, value in exif_data.items():
-                tag_name = TAGS.get(tag_id, tag_id)
-                if tag_name in ("DateTime", "DateTimeOriginal", "DateTimeDigitized"):
-                    # Parse the datetime string (format: "YYYY:MM:DD HH:MM:SS")
-                    dt = datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
-                    formatted = dt.strftime("%B %d, %Y at %I:%M:%S %p")
-                    return dt, formatted
+        exif = img.getexif()
+        if not exif:
+            return None, "Unknown"
+
+        try:
+            exif_ifd = exif.get_ifd(0x8769)
+        except Exception:
+            exif_ifd = {}
+
+        for dt_tag, offset_tag in PRIORITY_TAGS:
+            dt_str = exif_ifd.get(dt_tag) or exif.get(dt_tag)
+            if not dt_str:
+                continue
+
+            try:
+                dt = datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
+
+                if offset_tag:
+                    offset_str = exif_ifd.get(offset_tag) or exif.get(offset_tag)
+                    if offset_str:
+                        try:
+                            sign = -1 if offset_str.startswith("-") else 1
+                            parts = offset_str.lstrip("+-").split(":")
+                            offset_td = timedelta(
+                                hours=sign * int(parts[0]),
+                                minutes=sign * int(parts[1]) if len(parts) > 1 else 0,
+                            )
+                            # DateTimeOriginal stores UTC; offset is the local timezone.
+                            # Add offset to UTC to get the correct local time.
+                            dt = dt + offset_td
+                        except Exception:
+                            pass
+
+                formatted = dt.strftime("%B %d, %Y at %I:%M:%S %p")
+                return dt, formatted
+            except ValueError:
+                continue
     except Exception:
         pass
+
     return None, "Unknown"
 
 
