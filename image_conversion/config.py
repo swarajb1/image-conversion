@@ -20,6 +20,11 @@ IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", 
 # Supported video formats
 VIDEO_EXTENSIONS = ["mov", "mp4", "avi", "mkv", "flv", "wmv"]
 
+# RAW conversion mode for DNG files
+# True  = extract the embedded camera-processed preview (exact HDR+ colours, lower resolution)
+# False = full RAW conversion with histogram-matched colour transfer (full resolution, approximate colours)
+RAW_EXTRACT_PREVIEW = True
+
 # JPEG quality settings
 JPEG_QUALITY = 93  # Quality level (1-100, recommended: 90 for good quality with compression)
 JPEG_OPTIMIZE = True

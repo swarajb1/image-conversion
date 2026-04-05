@@ -2,11 +2,12 @@
 
 from pathlib import Path
 import shutil
+import numpy as np
 import pyvips
 import rawpy  # RAW demosaicing and embedded preview extraction for DNG colour reference
 from PIL import Image
 
-from config import DESTINATION_FOLDER, JPEG_QUALITY
+from config import DESTINATION_FOLDER, JPEG_QUALITY, RAW_EXTRACT_PREVIEW
 from exif_utils import get_image_datetime, is_samsung_device
 from filename_utils import FilenameManager
 
@@ -29,57 +30,67 @@ class PyVipsImageConverter:
         self.samsung_rename_only = samsung_rename_only
         self.max_name_len = max_name_len
 
+    @staticmethod
+    def _build_hist_lut(src_band: pyvips.Image, ref_band: pyvips.Image) -> np.ndarray:
+        """Build a uint8 LUT that maps src histogram to match ref histogram."""
+        src_data = np.frombuffer(src_band.write_to_memory(), dtype=np.uint8)
+        ref_data = np.frombuffer(ref_band.write_to_memory(), dtype=np.uint8)
+
+        src_hist, _ = np.histogram(src_data, bins=256, range=(0, 256))
+        ref_hist, _ = np.histogram(ref_data, bins=256, range=(0, 256))
+
+        src_cdf = np.cumsum(src_hist, dtype=np.float64)
+        ref_cdf = np.cumsum(ref_hist, dtype=np.float64)
+        src_cdf /= src_cdf[-1]
+        ref_cdf /= ref_cdf[-1]
+
+        return np.searchsorted(ref_cdf, src_cdf).clip(0, 255).astype(np.uint8)
+
     def _process_with_pyvips(
         self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
     ) -> None:
         is_raw = source_path.suffix.lower() in RAW_EXTENSIONS
 
         if is_raw:
-            # Load full-resolution image via dcraw
-            full = pyvips.Image.new_from_file(str(source_path))
-            try:
-                if "orientation" in full.get_fields():
-                    full = full.autorot()
-            except Exception:
-                pass
-
-            # Extract embedded camera-processed preview for colour reference.
-            # On Pixel devices this is the HDR+ rendered JPEG -- the only
-            # accurate colour reference for the proprietary processing.
-            try:
-                with rawpy.imread(str(source_path)) as raw:
+            with rawpy.imread(str(source_path)) as raw:
+                try:
                     thumb = raw.extract_thumb()
-                prev = pyvips.Image.new_from_buffer(bytes(thumb.data), "")
-            except Exception:
-                prev = None
+                except Exception:
+                    thumb = None
 
-            if prev is None:
-                # No preview -- use raw-processed image directly
+                if RAW_EXTRACT_PREVIEW and thumb is not None:
+                    # Write the embedded camera-processed JPEG directly --
+                    # exact HDR+ colours, no re-encoding needed.
+                    destination_path.write_bytes(bytes(thumb.data))
+                    return
+
+                # Full RAW conversion: demosaic with camera white balance,
+                # then histogram-match colours to the embedded preview.
+                rgb = raw.postprocess(
+                    use_camera_wb=True,
+                    output_color=rawpy.ColorSpace.sRGB,
+                    no_auto_bright=False,
+                )
+
+            h, w, b = rgb.shape
+            full = pyvips.Image.new_from_memory(rgb.tobytes(), w, h, b, "uchar")
+            full = full.copy(interpretation="srgb")
+
+            if thumb is None:
                 img = full
-                if img.interpretation != "srgb":
-                    img = img.colourspace("srgb")
             else:
-                # Reinhard colour transfer in L*a*b*: match both mean and
-                # standard deviation per channel so brightness, chroma, and
-                # hue independently track the camera-processed preview.
-                full_lab = full.colourspace("lab")
-                prev_lab = prev.colourspace("lab")
+                prev = pyvips.Image.new_from_buffer(bytes(thumb.data), "")
 
                 corrected = []
                 for ch in range(3):
-                    src = full_lab.extract_band(ch)
-                    ref = prev_lab.extract_band(ch)
-                    src_avg, ref_avg = src.avg(), ref.avg()
-                    src_std, ref_std = src.deviate(), ref.deviate()
+                    src_ch = full.extract_band(ch)
+                    ref_ch = prev.extract_band(ch)
+                    lut = self._build_hist_lut(src_ch, ref_ch)
+                    lut_img = pyvips.Image.new_from_memory(lut.tobytes(), 256, 1, 1, "uchar")
+                    corrected.append(src_ch.maplut(lut_img))
 
-                    if src_std > 1e-6:
-                        band = (src - src_avg) * (ref_std / src_std) + ref_avg
-                    else:
-                        band = src - src_avg + ref_avg
-                    corrected.append(band)
-
-                img_lab = corrected[0].bandjoin(corrected[1:])
-                img = img_lab.copy(interpretation="lab").colourspace("srgb")
+                img = corrected[0].bandjoin(corrected[1:])
+                img = img.copy(interpretation="srgb")
         else:
             load_kwargs = {"access": "sequential"} if sequential else {}
             img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
