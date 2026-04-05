@@ -23,6 +23,39 @@ class PyVipsImageConverter:
         self.filename_manager = filename_manager
         self.samsung_rename_only = samsung_rename_only
 
+    def _process_with_pyvips(
+        self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
+    ) -> None:
+        load_kwargs = {"access": "sequential"} if sequential else {}
+        img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
+
+        try:
+            if "orientation" in img.get_fields():
+                img = img.autorot()
+        except Exception:
+            pass
+
+        if img.bands == 4 and img.hasalpha():
+            img = img.flatten(background=[255, 255, 255])
+
+        try:
+            img = img.icc_transform("srgb")
+            if is_samsung:
+                img = img.gamma(1.1)
+        except Exception:
+            if img.interpretation != "srgb":
+                if img.bands >= 3:
+                    img = img.colourspace("srgb")
+
+        img.jpegsave(
+            str(destination_path),
+            Q=JPEG_QUALITY,
+            optimize_coding=True,
+            strip=True,
+            interlace=True,
+            subsample_mode="off",
+        )
+
     def convert_to_jpeg(self, source_path: Path, current: int = 0, total: int = 0) -> None:
         """Convert any image format to JPEG with datetime-based filename using pyvips.
 
@@ -61,44 +94,14 @@ class PyVipsImageConverter:
                 return
 
             # Otherwise, proceed with full conversion
-            # Load image with pyvips
-            img = pyvips.Image.new_from_file(str(source_path), access="sequential")
-
-            # Apply orientation correction if EXIF orientation exists
             try:
-                if "orientation" in img.get_fields():
-                    img = img.autorot()
-            except Exception:
-                # Some formats don't support autorot, skip silently
-                pass
-
-            # Check if we need to flatten alpha channel
-            if img.bands == 4 and img.hasalpha():
-                # Flatten alpha to white background
-                img = img.flatten(background=[255, 255, 255])
-
-            # Apply ICC color transform to sRGB to ensure proper color handling
-            try:
-                img = img.icc_transform("srgb")
-
-                # Mild gamma lift to counter HDR loss (Samsung-specific)
-                if is_samsung:
-                    img = img.gamma(1.1)
-            except Exception:
-                # Fallback to colourspace if ICC transform fails
-                if img.interpretation != "srgb":
-                    if img.bands >= 3:
-                        img = img.colourspace("srgb")
-
-            # Save as JPEG with high quality
-            img.jpegsave(
-                str(destination_path),
-                Q=JPEG_QUALITY,
-                optimize_coding=True,
-                strip=True,  # Strip metadata to avoid thumbnail rotation issues
-                interlace=True,  # Progressive JPEG
-                subsample_mode="off",  # 4:4:4 chroma subsampling (no subsampling, highest quality)
-            )
+                self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=True)
+            except pyvips.Error as e:
+                if "out of order" in str(e).lower():
+                    # Some JPEGs have non-sequential scan patterns; retry with full load into RAM
+                    self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+                else:
+                    raise
 
             # Print result
             counter_str = f"[{current}/{total}] " if total > 0 else ""
