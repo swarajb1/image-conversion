@@ -4,7 +4,15 @@ import subprocess
 from pathlib import Path
 from tqdm import tqdm
 
-from config import DESTINATION_FOLDER, VIDEO_CODEC, VIDEO_QUALITY, VIDEO_PRESET, AUDIO_CODEC, AUDIO_BITRATE
+from config import (
+    DESTINATION_FOLDER,
+    VIDEO_CODEC,
+    VIDEO_QUALITY,
+    VIDEO_PRESET,
+    AUDIO_CODEC,
+    AUDIO_BITRATE,
+    VIDEO_SKIP_REENCODE_MP4,
+)
 from exif_utils import get_video_datetime
 from filename_utils import FilenameManager
 
@@ -12,13 +20,15 @@ from filename_utils import FilenameManager
 class VideoConverter:
     """Handles video conversion to MP4 format."""
 
-    def __init__(self, filename_manager: FilenameManager):
+    def __init__(self, filename_manager: FilenameManager, max_name_len: int = 0):
         """Initialize the video converter.
 
         Args:
             filename_manager: FilenameManager instance for handling filenames
+            max_name_len: Max source filename length used to align terminal output columns
         """
         self.filename_manager = filename_manager
+        self.max_name_len = max_name_len
         self._check_ffmpeg()
 
     def _check_ffmpeg(self) -> None:
@@ -154,6 +164,22 @@ class VideoConverter:
                 output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
 
+            # Skip re-encoding for MP4 sources when configured — just copy/rename
+            if VIDEO_SKIP_REENCODE_MP4 and source_path.suffix.lower() == ".mp4":
+                import shutil
+
+                shutil.copy2(source_path, destination_path)
+
+                pad = self.max_name_len
+                total_w = len(str(total))
+                counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
+                if source_path.name != output_filename:
+                    src = source_path.name.ljust(pad)
+                    print(f"{counter_str}✓ Copied    {src} → {output_filename}")
+                else:
+                    print(f"{counter_str}✓ Copied    {source_path.name}")
+                return
+
             # Get video duration for progress tracking
             duration = self._get_video_duration(source_path)
 
@@ -188,7 +214,8 @@ class VideoConverter:
             ]
 
             # Initialize progress bar
-            counter_str = f"[{current}/{total}] " if total > 0 else ""
+            total_w = len(str(total))
+            counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             pbar = tqdm(
                 total=100,
                 desc=f"{counter_str}Converting {source_path.name}",
@@ -231,20 +258,23 @@ class VideoConverter:
             pbar.refresh()
             pbar.close()
 
-            counter_str = f"[{current}/{total}] " if total > 0 else ""
+            pad = self.max_name_len
             if process.returncode == 0:
-                print(f"{counter_str}✓ Converted {source_path.name} → {output_filename}")
+                src = source_path.name.ljust(pad)
+                print(f"{counter_str}✓ Converted {src} → {output_filename}")
             else:
                 # Read any remaining stderr
                 if process.stderr:
                     stderr = process.stderr.read()
-                    print(f"{counter_str}✗ Failed to convert {source_path.name}: {stderr}")
+                    print(f"{counter_str}✗ Failed    {source_path.name}: {stderr}")
                 else:
-                    print(f"{counter_str}✗ Failed to convert {source_path.name}")
+                    print(f"{counter_str}✗ Failed    {source_path.name}")
 
         except subprocess.CalledProcessError as e:
-            counter_str = f"[{current}/{total}] " if total > 0 else ""
-            print(f"{counter_str}✗ Failed to convert {source_path.name}: {e.stderr}")
+            total_w = len(str(total))
+            counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
+            print(f"{counter_str}✗ Failed    {source_path.name}: {e.stderr}")
         except Exception as e:
-            counter_str = f"[{current}/{total}] " if total > 0 else ""
-            print(f"{counter_str}✗ Failed to convert {source_path.name}: {e}")
+            total_w = len(str(total))
+            counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
+            print(f"{counter_str}✗ Failed    {source_path.name}: {e}")

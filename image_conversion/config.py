@@ -10,17 +10,31 @@ DESTINATION_FOLDER = Path("files/converted")
 # Timezone settings
 IST = timezone(timedelta(hours=5, minutes=30))  # Indian Standard Time (UTC+5:30)
 
+# Camera makes known to store DateTimeOriginal in UTC instead of local time (non-standard).
+# For these cameras, OffsetTimeOriginal must be added to get the correct local time.
+UTC_STORING_MAKES = {"canon"}
+
 # Supported image formats
-IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
+IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "dng"]
 
 # Supported video formats
 VIDEO_EXTENSIONS = ["mov", "mp4", "avi", "mkv", "flv", "wmv"]
 
+# RAW conversion mode for DNG files
+# True  = extract the embedded camera-processed preview (exact HDR+ colours, lower resolution)
+# False = full RAW conversion with histogram-matched colour transfer (full resolution, approximate colours)
+RAW_EXTRACT_PREVIEW = True
+
 # JPEG quality settings
-JPEG_QUALITY = 95  # Quality level (1-100, recommended: 90 for good quality with compression)
+JPEG_QUALITY = 93  # Quality level (1-100, recommended: 90 for good quality with compression)
 JPEG_OPTIMIZE = True
 
-# Video conversion settings
+# Video conversion mode
+# True  = skip re-encoding for MP4 sources, just rename/copy (fast, no quality loss)
+# False = re-encode all videos through FFmpeg (slow, strips metadata, may lose quality)
+VIDEO_SKIP_REENCODE_MP4 = True
+
+# Video conversion settings (only used when re-encoding)
 VIDEO_CODEC = "libx264"  # H.264 codec for MP4
 VIDEO_QUALITY = "18"  # CRF value (18 = visually lossless, lower = better quality)
 VIDEO_PRESET = "slow"  # Encoding speed preset (slower = better compression)
