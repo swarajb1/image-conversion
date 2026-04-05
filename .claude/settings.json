@@ -1,0 +1,10 @@
+{
+    "permissions": {
+        "allow": [
+            "Bash(git commit:*)",
+            "Bash(make test:*)",
+            "Bash(pre-commit run:*)"
+        ]
+    },
+    "model": "us.anthropic.claude-sonnet-4-6"
+}
