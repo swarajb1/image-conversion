@@ -15,13 +15,13 @@ IST = timezone(timedelta(hours=5, minutes=30))  # Indian Standard Time (UTC+5:30
 UTC_STORING_MAKES = {"canon"}
 
 # Supported image formats
-IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
+IMAGE_EXTENSIONS = ["heic", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "dng"]
 
 # Supported video formats
 VIDEO_EXTENSIONS = ["mov", "mp4", "avi", "mkv", "flv", "wmv"]
 
 # JPEG quality settings
-JPEG_QUALITY = 95  # Quality level (1-100, recommended: 90 for good quality with compression)
+JPEG_QUALITY = 93  # Quality level (1-100, recommended: 90 for good quality with compression)
 JPEG_OPTIMIZE = True
 
 # Video conversion settings

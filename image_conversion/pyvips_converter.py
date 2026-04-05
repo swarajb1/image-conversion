@@ -3,11 +3,15 @@
 from pathlib import Path
 import shutil
 import pyvips
+import rawpy  # RAW demosaicing and embedded preview extraction for DNG colour reference
 from PIL import Image
 
 from config import DESTINATION_FOLDER, JPEG_QUALITY
 from exif_utils import get_image_datetime, is_samsung_device
 from filename_utils import FilenameManager
+
+# RAW formats that use rawpy for proper white-balance-aware processing
+RAW_EXTENSIONS = {".dng"}
 
 
 class PyVipsImageConverter:
@@ -28,30 +32,82 @@ class PyVipsImageConverter:
     def _process_with_pyvips(
         self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
     ) -> None:
-        load_kwargs = {"access": "sequential"} if sequential else {}
-        img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
+        is_raw = source_path.suffix.lower() in RAW_EXTENSIONS
 
-        try:
-            if "orientation" in img.get_fields():
-                img = img.autorot()
-        except Exception:
-            pass
+        if is_raw:
+            # Load full-resolution image via dcraw
+            full = pyvips.Image.new_from_file(str(source_path))
+            try:
+                if "orientation" in full.get_fields():
+                    full = full.autorot()
+            except Exception:
+                pass
 
-        if img.bands == 4 and img.hasalpha():
-            img = img.flatten(background=[255, 255, 255])
+            # Extract embedded camera-processed preview for colour reference.
+            # On Pixel devices this is the HDR+ rendered JPEG -- the only
+            # accurate colour reference for the proprietary processing.
+            try:
+                with rawpy.imread(str(source_path)) as raw:
+                    thumb = raw.extract_thumb()
+                prev = pyvips.Image.new_from_buffer(bytes(thumb.data), "")
+            except Exception:
+                prev = None
 
-        try:
-            img = img.icc_transform("srgb")
-            if is_samsung:
-                img = img.gamma(1.1)
-        except Exception:
-            if img.interpretation != "srgb":
-                if img.bands >= 3:
+            if prev is None:
+                # No preview -- use raw-processed image directly
+                img = full
+                if img.interpretation != "srgb":
                     img = img.colourspace("srgb")
+            else:
+                # Reinhard colour transfer in L*a*b*: match both mean and
+                # standard deviation per channel so brightness, chroma, and
+                # hue independently track the camera-processed preview.
+                full_lab = full.colourspace("lab")
+                prev_lab = prev.colourspace("lab")
 
+                corrected = []
+                for ch in range(3):
+                    src = full_lab.extract_band(ch)
+                    ref = prev_lab.extract_band(ch)
+                    src_avg, ref_avg = src.avg(), ref.avg()
+                    src_std, ref_std = src.deviate(), ref.deviate()
+
+                    if src_std > 1e-6:
+                        band = (src - src_avg) * (ref_std / src_std) + ref_avg
+                    else:
+                        band = src - src_avg + ref_avg
+                    corrected.append(band)
+
+                img_lab = corrected[0].bandjoin(corrected[1:])
+                img = img_lab.copy(interpretation="lab").colourspace("srgb")
+        else:
+            load_kwargs = {"access": "sequential"} if sequential else {}
+            img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
+
+            try:
+                if "orientation" in img.get_fields():
+                    img = img.autorot()
+            except Exception:
+                pass
+
+            if img.bands == 4 and img.hasalpha():
+                img = img.flatten(background=[255, 255, 255])
+
+            try:
+                img = img.icc_transform("srgb")
+                if is_samsung:
+                    img = img.gamma(1.1)
+            except Exception:
+                if img.interpretation != "srgb":
+                    if img.bands >= 3:
+                        img = img.colourspace("srgb")
+
+        # Use maximum quality for RAW-derived images to avoid re-compression artefacts
+        # on top of what is already a lossy embedded JPEG.
+        quality = 100 if is_raw else JPEG_QUALITY
         img.jpegsave(
             str(destination_path),
-            Q=JPEG_QUALITY,
+            Q=quality,
             optimize_coding=True,
             strip=True,
             interlace=True,
@@ -99,14 +155,18 @@ class PyVipsImageConverter:
                 return
 
             # Otherwise, proceed with full conversion
-            try:
-                self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=True)
-            except pyvips.Error as e:
-                if "out of order" in str(e).lower():
-                    # Some JPEGs have non-sequential scan patterns; retry with full load into RAM
-                    self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
-                else:
-                    raise
+            if source_path.suffix.lower() in RAW_EXTENSIONS:
+                # RAW format loaders in libvips don't support sequential access
+                self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+            else:
+                try:
+                    self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=True)
+                except pyvips.Error as e:
+                    if "out of order" in str(e).lower():
+                        # Some JPEGs have non-sequential scan patterns; retry with full load into RAM
+                        self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+                    else:
+                        raise
 
             if source_path.name != new_filename:
                 src = source_path.name.ljust(pad)

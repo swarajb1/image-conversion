@@ -20,6 +20,8 @@ poetry run pre-commit run --all-files
 
 There is no automated test suite. Manual testing is done via `image_conversion/test.ipynb`.
 
+> Always run Python using `poetry run python` — never call the interpreter directly.
+
 ## Architecture
 
 The project is a batch converter for images and videos. Files are read from `files/to_convert/` and written to `files/converted/`.
