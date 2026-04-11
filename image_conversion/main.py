@@ -1,15 +1,21 @@
 """Main entry point for the image and video conversion application."""
 
 import argparse
+import shutil
+import subprocess
 import sys
-import pillow_heif
+from pathlib import Path
 
-from config import SOURCE_FOLDER, DESTINATION_FOLDER, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+import pillow_heif
+from PIL import Image
+
+from config import DESTINATION_FOLDER, IMAGE_EXTENSIONS, SOURCE_FOLDER, VIDEO_EXTENSIONS
+from exif_utils import get_image_datetime, get_video_datetime
+from filename_utils import FilenameManager
 from pyvips_converter import PyVipsImageConverter
 
 # from image_converter import ImageConverter
 from video_converter import VideoConverter
-from filename_utils import FilenameManager
 
 
 # Register HEIF opener for pillow
@@ -17,6 +23,94 @@ pillow_heif.register_heif_opener()
 
 # Create destination folder if it doesn't exist
 DESTINATION_FOLDER.mkdir(parents=True, exist_ok=True)
+
+# Identification metadata fields passed to ExifTool for JPG and MP4 files that
+# skip re-encoding. Mirrors the list in main_1.py.
+_IDENTIFICATION_FIELDS = [
+    # --- Location ---
+    "GPSLatitude", "GPSLongitude", "GPSAltitude", "GPSImgDirection",
+    "GPSSpeed", "GPSTrack", "GPSDateStamp", "GPSTimeStamp",
+    "GPSDestLatitude", "GPSDestLongitude",
+    "LocationCreated", "City", "Province-State", "Country", "Sub-location",
+    # --- Device identity ---
+    "Make", "Model", "SerialNumber", "LensSerialNumber",
+    "LensMake", "LensModel", "OwnerName", "CameraOwnerName",
+    # --- Timestamps ---
+    "DateTimeOriginal", "CreateDate", "ModifyDate",
+    "MediaCreateDate", "MediaModifyDate", "TrackCreateDate", "TrackModifyDate", "CreationTime",
+    # --- Person / identity ---
+    "Artist", "Creator", "Copyright", "PersonInImage", "By-line", "Contact",
+    # --- Software trail ---
+    "Software", "ProcessingSoftware", "CreatorTool",
+    # --- Document lineage ---
+    "DocumentID", "OriginalDocumentID", "InstanceID", "DerivedFrom",
+    # --- Device pairing ---
+    "MediaGroupUUID", "ContentIdentifier", "ImageUniqueID",
+]
+
+
+def check_exiftool() -> None:
+    """Verify ExifTool is installed and on PATH."""
+    try:
+        subprocess.run(["exiftool", "-ver"], capture_output=True, check=True)
+    except FileNotFoundError:
+        print("Error: exiftool is not installed or not on PATH.")
+        print("  macOS:  brew install exiftool")
+        print("  Linux:  sudo apt install libimage-exiftool-perl")
+        sys.exit(1)
+
+
+def _strip_metadata(path: Path) -> bool:
+    """Strip all identification fields from *path* using ExifTool. Returns True on success."""
+    cmd = (
+        ["exiftool", "-overwrite_original"]
+        + [f"-{field}=" for field in _IDENTIFICATION_FIELDS]
+        + [str(path)]
+    )
+    return subprocess.run(cmd, capture_output=True).returncode == 0
+
+
+def _handle_existing_jpg(
+    source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
+) -> None:
+    """Rename a source JPG by capture date and strip its identification metadata."""
+    try:
+        with Image.open(source) as img:
+            dt, _ = get_image_datetime(img)
+    except Exception:
+        dt = None
+
+    output_name = fm.determine_output_filename(source, dt)
+    dest = DESTINATION_FOLDER / output_name
+    shutil.copy2(source, dest)
+
+    total_w = len(str(total))
+    counter = f"[{current:>{total_w}}/{total}]"
+    src_col = source.name.ljust(max_name_len)
+
+    if _strip_metadata(dest):
+        print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
+    else:
+        print(f"{counter} ✗ Failed    {src_col} → {output_name}")
+
+
+def _handle_existing_mp4(
+    source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
+) -> None:
+    """Rename a source MP4 by capture date and strip its identification metadata."""
+    dt, _ = get_video_datetime(source)
+    output_name = fm.determine_video_output_filename(source, dt)
+    dest = DESTINATION_FOLDER / output_name
+    shutil.copy2(source, dest)
+
+    total_w = len(str(total))
+    counter = f"[{current:>{total_w}}/{total}]"
+    src_col = source.name.ljust(max_name_len)
+
+    if _strip_metadata(dest):
+        print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
+    else:
+        print(f"{counter} ✗ Failed    {src_col} → {output_name}")
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -61,6 +155,8 @@ def main() -> None:
         if e.code != 0:
             sys.exit(e.code)
         sys.exit(0)
+
+    check_exiftool()
 
     samsung_rename_only = args.samsung_rename
     if samsung_rename_only:
@@ -111,7 +207,10 @@ def main() -> None:
             filename_manager, samsung_rename_only=samsung_rename_only, max_name_len=max_name_len
         )
         for idx, source_file in enumerate(image_files, 1):
-            image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
+            if source_file.suffix.lower() in (".jpg", ".jpeg"):
+                _handle_existing_jpg(source_file, idx, len(image_files), filename_manager, max_name_len)
+            else:
+                image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
         print()
 
     # Process videos
@@ -119,7 +218,10 @@ def main() -> None:
         print("=== Processing Videos ===")
         video_converter = VideoConverter(filename_manager, max_name_len=max_name_len)
         for idx, source_file in enumerate(video_files, 1):
-            video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
+            if source_file.suffix.lower() == ".mp4":
+                _handle_existing_mp4(source_file, idx, len(video_files), filename_manager, max_name_len)
+            else:
+                video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
         print()
 
     print(f"Conversion complete!")

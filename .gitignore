@@ -178,3 +178,4 @@ cython_debug/
 
 files/
 zz_chat/
+.claude/settings.local.json
