@@ -6,6 +6,5 @@
             "Bash(pre-commit run:*)",
             "Bash(.venv/bin/ruff check:*)"
         ]
-    },
-    "model": "us.anthropic.claude-sonnet-4-6[1m]"
+    }
 }
