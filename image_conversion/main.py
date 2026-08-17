@@ -12,6 +12,7 @@ from PIL import Image
 from config import DESTINATION_FOLDER, IMAGE_EXTENSIONS, SOURCE_FOLDER, VIDEO_EXTENSIONS
 from exif_utils import get_image_datetime, get_video_datetime
 from filename_utils import FilenameManager
+from metadata_utils import strip_metadata
 from pyvips_converter import PyVipsImageConverter
 
 # from image_converter import ImageConverter
@@ -23,30 +24,6 @@ pillow_heif.register_heif_opener()
 
 # Create destination folder if it doesn't exist
 DESTINATION_FOLDER.mkdir(parents=True, exist_ok=True)
-
-# Identification metadata fields passed to ExifTool for JPG and MP4 files that
-# skip re-encoding. Mirrors the list in main_1.py.
-_IDENTIFICATION_FIELDS = [
-    # --- Location ---
-    "GPSLatitude", "GPSLongitude", "GPSAltitude", "GPSImgDirection",
-    "GPSSpeed", "GPSTrack", "GPSDateStamp", "GPSTimeStamp",
-    "GPSDestLatitude", "GPSDestLongitude",
-    "LocationCreated", "City", "Province-State", "Country", "Sub-location",
-    # --- Device identity ---
-    "Make", "Model", "SerialNumber", "LensSerialNumber",
-    "LensMake", "LensModel", "OwnerName", "CameraOwnerName",
-    # --- Timestamps ---
-    "DateTimeOriginal", "CreateDate", "ModifyDate",
-    "MediaCreateDate", "MediaModifyDate", "TrackCreateDate", "TrackModifyDate", "CreationTime",
-    # --- Person / identity ---
-    "Artist", "Creator", "Copyright", "PersonInImage", "By-line", "Contact",
-    # --- Software trail ---
-    "Software", "ProcessingSoftware", "CreatorTool",
-    # --- Document lineage ---
-    "DocumentID", "OriginalDocumentID", "InstanceID", "DerivedFrom",
-    # --- Device pairing ---
-    "MediaGroupUUID", "ContentIdentifier", "ImageUniqueID",
-]
 
 
 def check_exiftool() -> None:
@@ -60,19 +37,7 @@ def check_exiftool() -> None:
         sys.exit(1)
 
 
-def _strip_metadata(path: Path) -> bool:
-    """Strip all identification fields from *path* using ExifTool. Returns True on success."""
-    cmd = (
-        ["exiftool", "-overwrite_original"]
-        + [f"-{field}=" for field in _IDENTIFICATION_FIELDS]
-        + [str(path)]
-    )
-    return subprocess.run(cmd, capture_output=True).returncode == 0
-
-
-def _handle_existing_jpg(
-    source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
-) -> None:
+def _handle_existing_jpg(source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int) -> None:
     """Rename a source JPG by capture date and strip its identification metadata."""
     try:
         with Image.open(source) as img:
@@ -88,15 +53,13 @@ def _handle_existing_jpg(
     counter = f"[{current:>{total_w}}/{total}]"
     src_col = source.name.ljust(max_name_len)
 
-    if _strip_metadata(dest):
+    if strip_metadata(dest):
         print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
     else:
         print(f"{counter} ✗ Failed    {src_col} → {output_name}")
 
 
-def _handle_existing_mp4(
-    source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
-) -> None:
+def _handle_existing_mp4(source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int) -> None:
     """Rename a source MP4 by capture date and strip its identification metadata."""
     dt, _ = get_video_datetime(source)
     output_name = fm.determine_video_output_filename(source, dt)
@@ -107,7 +70,7 @@ def _handle_existing_mp4(
     counter = f"[{current:>{total_w}}/{total}]"
     src_col = source.name.ljust(max_name_len)
 
-    if _strip_metadata(dest):
+    if strip_metadata(dest):
         print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
     else:
         print(f"{counter} ✗ Failed    {src_col} → {output_name}")
@@ -194,7 +157,6 @@ def main() -> None:
     image_files.sort(key=lambda x: x.name)
     video_files.sort(key=lambda x: x.name)
 
-    total_files = len(image_files) + len(video_files)
     print(f"Found {len(image_files)} image file(s) and {len(video_files)} video file(s) to convert\n")
 
     filename_manager = FilenameManager()
@@ -224,7 +186,7 @@ def main() -> None:
                 video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
         print()
 
-    print(f"Conversion complete!")
+    print("Conversion complete!")
 
 
 if __name__ == "__main__":

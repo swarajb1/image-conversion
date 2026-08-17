@@ -30,9 +30,10 @@ JPEG_QUALITY = 93  # Quality level (1-100, recommended: 90 for good quality with
 JPEG_OPTIMIZE = True
 
 # Video conversion mode
-# True  = skip re-encoding for MP4 sources, just rename/copy (fast, no quality loss)
-# False = re-encode all videos through FFmpeg (slow, strips metadata, may lose quality)
-VIDEO_SKIP_REENCODE_MP4 = True
+# True  = try a lossless stream copy (remux) first; only re-encode when the source
+#         codecs cannot live in an MP4 container (fast, no quality loss)
+# False = always re-encode through FFmpeg (slow, may lose quality)
+VIDEO_STREAM_COPY = True
 
 # Video conversion settings (only used when re-encoding)
 VIDEO_CODEC = "libx264"  # H.264 codec for MP4

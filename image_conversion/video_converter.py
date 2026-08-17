@@ -11,10 +11,11 @@ from config import (
     VIDEO_PRESET,
     AUDIO_CODEC,
     AUDIO_BITRATE,
-    VIDEO_SKIP_REENCODE_MP4,
+    VIDEO_STREAM_COPY,
 )
 from exif_utils import get_video_datetime
 from filename_utils import FilenameManager
+from metadata_utils import strip_metadata
 
 
 class VideoConverter:
@@ -141,6 +142,37 @@ class VideoConverter:
         except (subprocess.CalledProcessError, ValueError):
             return "Unknown"
 
+    def _try_stream_copy(self, source_path: Path, destination_path: Path) -> bool:
+        """Remux the source into MP4 without re-encoding.
+
+        Args:
+            source_path: Path to the source video file
+            destination_path: Path to write the remuxed MP4 to
+
+        Returns:
+            True if the remux succeeded, False if the streams cannot live in an MP4
+            container (caller should fall back to a full re-encode)
+        """
+        command = [
+            "ffmpeg",
+            "-i",
+            str(source_path),
+            "-map_metadata",
+            "-1",  # Strip all metadata
+            "-c",
+            "copy",  # Stream copy — no decode/encode
+            "-movflags",
+            "+faststart",  # Enable streaming
+            "-y",  # Overwrite output file if exists
+            str(destination_path),
+        ]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            # ffmpeg creates the output before it discovers the codec is unmuxable
+            destination_path.unlink(missing_ok=True)
+            return False
+        return True
+
     def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> None:
         """Convert any video format to MP4 with progress bar.
 
@@ -164,20 +196,16 @@ class VideoConverter:
                 output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
 
-            # Skip re-encoding for MP4 sources when configured — just copy/rename
-            if VIDEO_SKIP_REENCODE_MP4 and source_path.suffix.lower() == ".mp4":
-                import shutil
-
-                shutil.copy2(source_path, destination_path)
+            # Try a lossless remux first — falls through to a re-encode if the codecs
+            # cannot be muxed into MP4 (e.g. PCM audio in a .mov, MJPEG in an .avi)
+            if VIDEO_STREAM_COPY and self._try_stream_copy(source_path, destination_path):
+                strip_metadata(destination_path)
 
                 pad = self.max_name_len
                 total_w = len(str(total))
                 counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
-                if source_path.name != output_filename:
-                    src = source_path.name.ljust(pad)
-                    print(f"{counter_str}✓ Copied    {src} → {output_filename}")
-                else:
-                    print(f"{counter_str}✓ Copied    {source_path.name}")
+                src = source_path.name.ljust(pad)
+                print(f"{counter_str}✓ Remuxed   {src} → {output_filename}")
                 return
 
             # Get video duration for progress tracking
