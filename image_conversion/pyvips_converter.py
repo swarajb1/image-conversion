@@ -21,6 +21,7 @@ from config import (
 )
 from exif_utils import get_image_datetime, is_samsung_device
 from filename_utils import FilenameManager
+from metadata_utils import strip_metadata
 
 # RAW formats that use rawpy for proper white-balance-aware processing
 RAW_EXTENSIONS = {".dng"}
@@ -241,8 +242,13 @@ class PyVipsImageConverter:
             # no decode or re-encode. _output_ext has already confirmed the ftyp brand.
             if ext == "heif" and source_path.suffix.lower() in HEIF_EXTENSIONS:
                 shutil.copy2(source_path, destination_path)
+                # There is no encoder on this path to apply strip=True, so the identification
+                # metadata every other output drops has to be removed explicitly. The pixels
+                # stay byte-identical; only the metadata boxes are rewritten.
+                stripped = strip_metadata(destination_path)
                 src = source_path.name.ljust(pad)
-                print(f"{counter_str}✓ Passed    {src} → {new_filename} (HEIF, no re-encode)")
+                suffix = "HEIF, no re-encode" if stripped else "HEIF, no re-encode; METADATA NOT STRIPPED"
+                print(f"{counter_str}✓ Passed    {src} → {new_filename} ({suffix})")
                 return
 
             # Otherwise, proceed with full conversion
