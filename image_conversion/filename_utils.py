@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import DESTINATION_FOLDER, FILENAME_PATTERN, DATETIME_ONLY_PATTERN
+from config import FILENAME_PATTERN, DATETIME_ONLY_PATTERN
 
 
 class FilenameManager:
@@ -36,12 +36,13 @@ class FilenameManager:
         """
         return bool(re.match(DATETIME_ONLY_PATTERN, filename, re.IGNORECASE))
 
-    def generate_filename(self, dt: datetime | None, source_name: str) -> str:
-        """Generate filename in format IMG_<yyyymmdd>_<hhmmss>.jpg with deduplication.
+    def generate_filename(self, dt: datetime | None, source_name: str, ext: str = "jpg") -> str:
+        """Generate filename in format IMG_<yyyymmdd>_<hhmmss>.<ext> with deduplication.
 
         Args:
             dt: datetime object from EXIF data, or None
             source_name: original filename for fallback
+            ext: output file extension without the leading dot
 
         Returns:
             str: Generated filename
@@ -52,14 +53,14 @@ class FilenameManager:
             # Fallback to timestamp-based name if no EXIF data
             base_name = f"IMG_{datetime.now().strftime('%Y%m%d_%H%M%S')}_noexif"
 
-        filename = f"{base_name}.jpg"
+        filename = f"{base_name}.{ext}"
 
         # Handle duplicates by checking the set of already-used filenames for this run
         if filename in self.used_filenames:
             counter = 1
-            while f"{base_name}-{counter}.jpg" in self.used_filenames:
+            while f"{base_name}-{counter}.{ext}" in self.used_filenames:
                 counter += 1
-            filename = f"{base_name}-{counter}.jpg"
+            filename = f"{base_name}-{counter}.{ext}"
 
         # Record filename as used for this run
         self.used_filenames.add(filename)
@@ -107,12 +108,13 @@ class FilenameManager:
         self.used_filenames.add(filename)
         return filename
 
-    def determine_output_filename(self, source_path: Path, dt: datetime | None) -> str:
+    def determine_output_filename(self, source_path: Path, dt: datetime | None, ext: str = "jpg") -> str:
         """Determine the appropriate output filename based on source and format rules.
 
         Args:
             source_path: Path to the source image file
             dt: datetime object from EXIF data, or None
+            ext: output file extension without the leading dot
 
         Returns:
             str: The output filename to use
@@ -121,12 +123,12 @@ class FilenameManager:
         if self.is_datetime_only_format(source_path.name):
             # Add IMG_ prefix to the existing filename
             stem = source_path.stem  # e.g., "20251207_175000"
-            new_filename = f"IMG_{stem}.jpg"
+            new_filename = f"IMG_{stem}.{ext}"
             self.used_filenames.add(new_filename)
             return new_filename
 
         # Always generate new filename based on datetime metadata
-        return self.generate_filename(dt, source_path.name)
+        return self.generate_filename(dt, source_path.name, ext)
 
     def determine_video_output_filename(self, source_path: Path, dt: datetime | None) -> str:
         """Determine the appropriate output filename for videos.
