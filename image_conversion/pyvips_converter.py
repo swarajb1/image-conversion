@@ -21,28 +21,8 @@ from config import (
 )
 from exif_utils import get_image_datetime, is_samsung_device
 from filename_utils import FilenameManager
+from format_utils import HEIF, RAW, detect_kind
 from metadata_utils import strip_metadata
-
-# RAW formats that use rawpy for proper white-balance-aware processing
-RAW_EXTENSIONS = {".dng"}
-
-# Extensions carrying an ISO/IEC 23008-12 (HEIF) container
-HEIF_EXTENSIONS = {".heic", ".heif"}
-
-# ftyp major brands that make a file a readable HEIF container. A .heic file is already
-# valid HEIF, so renaming one of these needs no decode -- but a few exotic files carry a
-# brand outside this set and would be rejected by some readers if simply renamed.
-HEIF_FTYP_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis"}
-
-
-def _is_heif_container(path: Path) -> bool:
-    """Return True when the file's ftyp major brand marks it as HEIF-compatible."""
-    try:
-        with path.open("rb") as handle:
-            header = handle.read(12)
-    except OSError:
-        return False
-    return len(header) == 12 and header[4:8] == b"ftyp" and header[8:12] in HEIF_FTYP_BRANDS
 
 
 class PyVipsImageConverter:
@@ -78,23 +58,23 @@ class PyVipsImageConverter:
 
     @staticmethod
     def _output_ext(source_path: Path) -> str:
-        """Pick the output extension for a source file.
+        """Pick the output extension from the file's real format.
 
-        The brand check lives here so the chosen filename and the branch that writes it
-        can never disagree: a .heic that fails the check gets a .jpg name and takes the
+        Detection lives here so the chosen filename and the branch that writes it can
+        never disagree: a file that is not really HEIF gets a .jpg name and takes the
         normal encode path.
         """
-        suffix = source_path.suffix.lower()
-        if HEIC_PASSTHROUGH and suffix in HEIF_EXTENSIONS and _is_heif_container(source_path):
+        kind = detect_kind(source_path)
+        if HEIC_PASSTHROUGH and kind == HEIF:
             return "heif"
-        if RAW_TO_HEIF and suffix in RAW_EXTENSIONS:
+        if RAW_TO_HEIF and kind == RAW:
             return "heif"
         return "jpg"
 
     def _process_with_pyvips(
         self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
     ) -> None:
-        is_raw = source_path.suffix.lower() in RAW_EXTENSIONS
+        is_raw = detect_kind(source_path) == RAW
 
         if is_raw and RAW_TO_HEIF:
             # Full demosaic at 16 bits, encoded to 10-bit HEIF. libvips maps the full
@@ -240,7 +220,7 @@ class PyVipsImageConverter:
 
             # A .heic file is already a valid HEIF container -- copy the bytes and rename,
             # no decode or re-encode. _output_ext has already confirmed the ftyp brand.
-            if ext == "heif" and source_path.suffix.lower() in HEIF_EXTENSIONS:
+            if ext == "heif" and detect_kind(source_path) == HEIF:
                 shutil.copy2(source_path, destination_path)
                 # There is no encoder on this path to apply strip=True, so the identification
                 # metadata every other output drops has to be removed explicitly. The pixels
@@ -252,7 +232,7 @@ class PyVipsImageConverter:
                 return
 
             # Otherwise, proceed with full conversion
-            if source_path.suffix.lower() in RAW_EXTENSIONS:
+            if detect_kind(source_path) == RAW:
                 # RAW format loaders in libvips don't support sequential access
                 self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
             else:

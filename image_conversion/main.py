@@ -12,6 +12,7 @@ from PIL import Image
 from config import DESTINATION_FOLDER, IMAGE_EXTENSIONS, SOURCE_FOLDER, VIDEO_EXTENSIONS
 from exif_utils import get_image_datetime, get_video_datetime
 from filename_utils import FilenameManager
+from format_utils import JPEG, detect_kind
 from metadata_utils import strip_metadata
 from pyvips_converter import PyVipsImageConverter
 
@@ -169,7 +170,9 @@ def main() -> None:
             filename_manager, samsung_rename_only=samsung_rename_only, max_name_len=max_name_len
         )
         for idx, source_file in enumerate(image_files, 1):
-            if source_file.suffix.lower() in (".jpg", ".jpeg"):
+            # Route on what the file is, not what it is named. Tools like Picasa rewrite
+            # a DNG as JPEG while keeping the .dng name, which would otherwise reach rawpy.
+            if detect_kind(source_file) == JPEG:
                 _handle_existing_jpg(source_file, idx, len(image_files), filename_manager, max_name_len)
             else:
                 image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))

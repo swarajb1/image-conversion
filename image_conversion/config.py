@@ -20,6 +20,9 @@ IMAGE_EXTENSIONS = ["heic", "heif", "jpg", "jpeg", "png", "gif", "bmp", "tiff", 
 # Supported video formats
 VIDEO_EXTENSIONS = ["mov", "mp4", "avi", "mkv", "flv", "wmv"]
 
+# RAW formats routed through rawpy for white-balance-aware demosaicing
+RAW_EXTENSIONS = {".dng"}
+
 # HEIC/HEIF handling
 # True  = copy the source bytes unchanged to a .heif name (lossless; a .heic file is
 #         already a valid HEIF container, so no decode/encode is needed). Files whose
