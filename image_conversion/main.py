@@ -2,7 +2,6 @@
 
 import argparse
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -12,9 +11,9 @@ from PIL import Image
 
 from config import DESTINATION_FOLDER, IMAGE_EXTENSIONS, SOURCE_FOLDER, VIDEO_EXTENSIONS
 from exif_utils import get_image_datetime, get_video_datetime
-from filename_utils import FilenameManager
+from filename_utils import FilenameManager, collect_files
 from format_utils import JPEG, detect_kind
-from metadata_utils import strip_metadata
+from metadata_utils import check_exiftool, strip_metadata
 from pyvips_converter import PyVipsImageConverter
 from stats import RunStats
 
@@ -29,17 +28,6 @@ pillow_heif.register_heif_opener()
 DESTINATION_FOLDER.mkdir(parents=True, exist_ok=True)
 
 
-def check_exiftool() -> None:
-    """Verify ExifTool is installed and on PATH."""
-    try:
-        subprocess.run(["exiftool", "-ver"], capture_output=True, check=True)
-    except FileNotFoundError:
-        print("Error: exiftool is not installed or not on PATH.")
-        print("  macOS:  brew install exiftool")
-        print("  Linux:  sudo apt install libimage-exiftool-perl")
-        sys.exit(1)
-
-
 def _handle_existing_jpg(
     source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
 ) -> tuple[str, str | None]:
@@ -52,11 +40,18 @@ def _handle_existing_jpg(
 
     output_name = fm.determine_output_filename(source, dt)
     dest = DESTINATION_FOLDER / output_name
-    shutil.copy2(source, dest)
 
     total_w = len(str(total))
     counter = f"[{current:>{total_w}}/{total}]"
     src_col = source.name.ljust(max_name_len)
+
+    # One unreadable file must not abort the batch -- the converters catch broadly for
+    # the same reason, so the run reaches its summary.
+    try:
+        shutil.copy2(source, dest)
+    except OSError as e:
+        print(f"{counter} ✗ Failed    {src_col} → {output_name}: {e}")
+        return "Failed", str(e)
 
     if strip_metadata(dest):
         print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
@@ -73,11 +68,16 @@ def _handle_existing_mp4(
     dt, _ = get_video_datetime(source)
     output_name = fm.determine_video_output_filename(source, dt)
     dest = DESTINATION_FOLDER / output_name
-    shutil.copy2(source, dest)
 
     total_w = len(str(total))
     counter = f"[{current:>{total_w}}/{total}]"
     src_col = source.name.ljust(max_name_len)
+
+    try:
+        shutil.copy2(source, dest)
+    except OSError as e:
+        print(f"{counter} ✗ Failed    {src_col} → {output_name}: {e}")
+        return "Failed", str(e)
 
     if strip_metadata(dest):
         print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
@@ -140,33 +140,12 @@ def main() -> None:
         print(f"Error: Source folder '{SOURCE_FOLDER}' does not exist")
         return
 
-    # Collect all common image formats
-    image_files = []
-    for ext in IMAGE_EXTENSIONS:
-        # Case-insensitive pattern matching
-        image_files.extend(
-            SOURCE_FOLDER.glob(
-                f"*.[{ext[0].lower()}{ext[0].upper()}]" + "".join(f"[{c.lower()}{c.upper()}]" for c in ext[1:])
-            )
-        )
-
-    # Collect all video formats
-    video_files = []
-    for ext in VIDEO_EXTENSIONS:
-        # Case-insensitive pattern matching
-        video_files.extend(
-            SOURCE_FOLDER.glob(
-                f"*.[{ext[0].lower()}{ext[0].upper()}]" + "".join(f"[{c.lower()}{c.upper()}]" for c in ext[1:])
-            )
-        )
+    image_files = collect_files(IMAGE_EXTENSIONS)
+    video_files = collect_files(VIDEO_EXTENSIONS)
 
     if not image_files and not video_files:
         print(f"No image or video files found in '{SOURCE_FOLDER}'")
         return
-
-    # Sort files by name
-    image_files.sort(key=lambda x: x.name)
-    video_files.sort(key=lambda x: x.name)
 
     print(f"Found {len(image_files)} image file(s) and {len(video_files)} video file(s) to convert\n")
 
@@ -184,7 +163,15 @@ def main() -> None:
         for idx, source_file in enumerate(image_files, 1):
             # Route on what the file is, not what it is named. Tools like Picasa rewrite
             # a DNG as JPEG while keeping the .dng name, which would otherwise reach rawpy.
-            if detect_kind(source_file) == JPEG:
+            # The copy+strip shortcut only applies when the converter has nothing else to
+            # contribute: Samsung rename mode and the already-correct-name check both live
+            # there, and skipping it would silently disable them.
+            fast_path = (
+                detect_kind(source_file) == JPEG
+                and not samsung_rename_only
+                and not filename_manager.is_valid_format(source_file.name)
+            )
+            if fast_path:
                 action, error = _handle_existing_jpg(
                     source_file, idx, len(image_files), filename_manager, max_name_len
                 )
@@ -198,7 +185,9 @@ def main() -> None:
         print("=== Processing Videos ===")
         video_converter = VideoConverter(filename_manager, max_name_len=max_name_len)
         for idx, source_file in enumerate(video_files, 1):
-            if source_file.suffix.lower() == ".mp4":
+            # Same gate as the image fast path: a file already named VID_<date>.mp4 must
+            # keep that name, and only the converter knows how to check for it.
+            if source_file.suffix.lower() == ".mp4" and not filename_manager.is_valid_video_format(source_file.name):
                 action, error = _handle_existing_mp4(
                     source_file, idx, len(video_files), filename_manager, max_name_len
                 )

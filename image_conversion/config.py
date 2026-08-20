@@ -30,23 +30,13 @@ RAW_EXTENSIONS = {".dng"}
 # False = decode and re-encode to JPEG via the normal pyvips path
 HEIC_PASSTHROUGH = True
 
-# DNG handling
-# True  = full demosaic written as 10-bit HEIF (keeps the raw tonal headroom that 8-bit
-#         JPEG discards); overrides RAW_EXTRACT_PREVIEW below
-# False = existing JPEG behaviour, governed by RAW_EXTRACT_PREVIEW
-RAW_TO_HEIF = True
-
-# HEIF encoder settings for DNG output (only used when RAW_TO_HEIF is True)
+# HEIF encoder settings for DNG output: a full demosaic written as 10-bit HEIF, which
+# keeps the raw tonal headroom that 8-bit JPEG discards
 RAW_HEIF_COMPRESSION = "av1"  # "av1" (smaller, modern) or "hevc" (wider device support)
 RAW_HEIF_QUALITY = 90  # 1-100; 90 keeps gradients clean without bloating files
 RAW_HEIF_BITDEPTH = 10  # 8, 10 or 12 -- 10 is the point of this whole path
 RAW_HEIF_EFFORT = 4  # 0-9 CPU effort; higher is slower and slightly smaller
 RAW_HEIF_AUTO_BRIGHT = False  # False = faithful exposure; True = auto-lift dark frames
-
-# RAW conversion mode for DNG files -- ignored when RAW_TO_HEIF is True
-# True  = extract the embedded camera-processed preview (exact HDR+ colours, lower resolution)
-# False = full RAW conversion with histogram-matched colour transfer (full resolution, approximate colours)
-RAW_EXTRACT_PREVIEW = True
 
 # JPEG quality settings
 JPEG_QUALITY = 93  # Quality level (1-100, recommended: 90 for good quality with compression)

@@ -4,7 +4,16 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import FILENAME_PATTERN, DATETIME_ONLY_PATTERN
+from config import FILENAME_PATTERN, DATETIME_ONLY_PATTERN, SOURCE_FOLDER
+
+
+def collect_files(extensions: list[str]) -> list[Path]:
+    """Glob SOURCE_FOLDER for files matching the given extensions, case-insensitively."""
+    files: list[Path] = []
+    for ext in extensions:
+        pattern = f"*.[{ext[0].lower()}{ext[0].upper()}]" + "".join(f"[{c.lower()}{c.upper()}]" for c in ext[1:])
+        files.extend(SOURCE_FOLDER.glob(pattern))
+    return sorted(files, key=lambda f: f.name)
 
 
 class FilenameManager:
@@ -79,12 +88,13 @@ class FilenameManager:
 
         return bool(re.match(VIDEO_FILENAME_PATTERN, filename))
 
-    def generate_video_filename(self, dt: datetime | None, source_name: str) -> str:
-        """Generate filename in format VID_<yyyymmdd>_<hhmmss>.mp4 with deduplication.
+    def generate_video_filename(self, dt: datetime | None, source_name: str, ext: str = "mp4") -> str:
+        """Generate filename in format VID_<yyyymmdd>_<hhmmss>.<ext> with deduplication.
 
         Args:
             dt: datetime object from video metadata, or None
             source_name: original filename for fallback
+            ext: output file extension without the leading dot
 
         Returns:
             str: Generated filename
@@ -95,14 +105,14 @@ class FilenameManager:
             # Fallback to timestamp-based name if no metadata
             base_name = f"VID_{datetime.now().strftime('%Y%m%d_%H%M%S')}_nometa"
 
-        filename = f"{base_name}.mp4"
+        filename = f"{base_name}.{ext}"
 
         # Handle duplicates by checking the set of already-used filenames for this run
         if filename in self.used_filenames:
             counter = 1
-            while f"{base_name}-{counter}.mp4" in self.used_filenames:
+            while f"{base_name}-{counter}.{ext}" in self.used_filenames:
                 counter += 1
-            filename = f"{base_name}-{counter}.mp4"
+            filename = f"{base_name}-{counter}.{ext}"
 
         # Record filename as used for this run
         self.used_filenames.add(filename)

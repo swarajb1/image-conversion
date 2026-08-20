@@ -203,12 +203,15 @@ class VideoConverter:
             # Try a lossless remux first — falls through to a re-encode if the codecs
             # cannot be muxed into MP4 (e.g. PCM audio in a .mov, MJPEG in an .avi)
             if VIDEO_STREAM_COPY and self._try_stream_copy(source_path, destination_path):
-                strip_metadata(destination_path)
-
                 pad = self.max_name_len
                 total_w = len(str(total))
                 counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
                 src = source_path.name.ljust(pad)
+
+                if not strip_metadata(destination_path):
+                    print(f"{counter_str}✗ Failed    {src} → {output_filename} (remuxed; METADATA NOT STRIPPED)")
+                    return "Failed", "exiftool could not strip metadata"
+
                 print(f"{counter_str}✓ Remuxed   {src} → {output_filename}")
                 return "Remuxed", None
 

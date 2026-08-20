@@ -2,22 +2,19 @@
 
 from pathlib import Path
 import shutil
-import numpy as np
 import pyvips
-import rawpy  # RAW demosaicing and embedded preview extraction for DNG colour reference
+import rawpy  # RAW demosaicing for DNG
 from PIL import Image
 
 from config import (
     DESTINATION_FOLDER,
     HEIC_PASSTHROUGH,
     JPEG_QUALITY,
-    RAW_EXTRACT_PREVIEW,
     RAW_HEIF_AUTO_BRIGHT,
     RAW_HEIF_BITDEPTH,
     RAW_HEIF_COMPRESSION,
     RAW_HEIF_EFFORT,
     RAW_HEIF_QUALITY,
-    RAW_TO_HEIF,
 )
 from exif_utils import get_image_datetime, is_samsung_device
 from filename_utils import FilenameManager
@@ -41,22 +38,6 @@ class PyVipsImageConverter:
         self.max_name_len = max_name_len
 
     @staticmethod
-    def _build_hist_lut(src_band: pyvips.Image, ref_band: pyvips.Image) -> np.ndarray:
-        """Build a uint8 LUT that maps src histogram to match ref histogram."""
-        src_data = np.frombuffer(src_band.write_to_memory(), dtype=np.uint8)
-        ref_data = np.frombuffer(ref_band.write_to_memory(), dtype=np.uint8)
-
-        src_hist, _ = np.histogram(src_data, bins=256, range=(0, 256))
-        ref_hist, _ = np.histogram(ref_data, bins=256, range=(0, 256))
-
-        src_cdf = np.cumsum(src_hist, dtype=np.float64)
-        ref_cdf = np.cumsum(ref_hist, dtype=np.float64)
-        src_cdf /= src_cdf[-1]
-        ref_cdf /= ref_cdf[-1]
-
-        return np.searchsorted(ref_cdf, src_cdf).clip(0, 255).astype(np.uint8)
-
-    @staticmethod
     def _output_ext(source_path: Path) -> str:
         """Pick the output extension from the file's real format.
 
@@ -67,16 +48,14 @@ class PyVipsImageConverter:
         kind = detect_kind(source_path)
         if HEIC_PASSTHROUGH and kind == HEIF:
             return "heif"
-        if RAW_TO_HEIF and kind == RAW:
+        if kind == RAW:
             return "heif"
         return "jpg"
 
     def _process_with_pyvips(
         self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
     ) -> None:
-        is_raw = detect_kind(source_path) == RAW
-
-        if is_raw and RAW_TO_HEIF:
+        if detect_kind(source_path) == RAW:
             # Full demosaic at 16 bits, encoded to 10-bit HEIF. libvips maps the full
             # ushort 0-65535 range into the target bit depth itself, so the array is
             # handed over unscaled -- shifting it down to 0-1023 first would go black.
@@ -103,74 +82,30 @@ class PyVipsImageConverter:
             )
             return
 
-        if is_raw:
-            with rawpy.imread(str(source_path)) as raw:
-                try:
-                    thumb = raw.extract_thumb()
-                except Exception:
-                    thumb = None
+        load_kwargs = {"access": "sequential"} if sequential else {}
+        img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
 
-                if RAW_EXTRACT_PREVIEW and thumb is not None:
-                    # Write the embedded camera-processed JPEG directly --
-                    # exact HDR+ colours, no re-encoding needed.
-                    destination_path.write_bytes(bytes(thumb.data))
-                    return
+        try:
+            if "orientation" in img.get_fields():
+                img = img.autorot()
+        except Exception:
+            pass
 
-                # Full RAW conversion: demosaic with camera white balance,
-                # then histogram-match colours to the embedded preview.
-                rgb = raw.postprocess(
-                    use_camera_wb=True,
-                    output_color=rawpy.ColorSpace.sRGB,
-                    no_auto_bright=False,
-                )
+        if img.bands == 4 and img.hasalpha():
+            img = img.flatten(background=[255, 255, 255])
 
-            h, w, b = rgb.shape
-            full = pyvips.Image.new_from_memory(rgb.tobytes(), w, h, b, "uchar")
-            full = full.copy(interpretation="srgb")
+        try:
+            img = img.icc_transform("srgb")
+            if is_samsung:
+                img = img.gamma(1.1)
+        except Exception:
+            if img.interpretation != "srgb":
+                if img.bands >= 3:
+                    img = img.colourspace("srgb")
 
-            if thumb is None:
-                img = full
-            else:
-                prev = pyvips.Image.new_from_buffer(bytes(thumb.data), "")
-
-                corrected = []
-                for ch in range(3):
-                    src_ch = full.extract_band(ch)
-                    ref_ch = prev.extract_band(ch)
-                    lut = self._build_hist_lut(src_ch, ref_ch)
-                    lut_img = pyvips.Image.new_from_memory(lut.tobytes(), 256, 1, 1, "uchar")
-                    corrected.append(src_ch.maplut(lut_img))
-
-                img = corrected[0].bandjoin(corrected[1:])
-                img = img.copy(interpretation="srgb")
-        else:
-            load_kwargs = {"access": "sequential"} if sequential else {}
-            img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
-
-            try:
-                if "orientation" in img.get_fields():
-                    img = img.autorot()
-            except Exception:
-                pass
-
-            if img.bands == 4 and img.hasalpha():
-                img = img.flatten(background=[255, 255, 255])
-
-            try:
-                img = img.icc_transform("srgb")
-                if is_samsung:
-                    img = img.gamma(1.1)
-            except Exception:
-                if img.interpretation != "srgb":
-                    if img.bands >= 3:
-                        img = img.colourspace("srgb")
-
-        # Use maximum quality for RAW-derived images to avoid re-compression artefacts
-        # on top of what is already a lossy embedded JPEG.
-        quality = 100 if is_raw else JPEG_QUALITY
         img.jpegsave(
             str(destination_path),
-            Q=quality,
+            Q=JPEG_QUALITY,
             optimize_coding=True,
             strip=True,
             interlace=True,
@@ -229,10 +164,11 @@ class PyVipsImageConverter:
                 # There is no encoder on this path to apply strip=True, so the identification
                 # metadata every other output drops has to be removed explicitly. The pixels
                 # stay byte-identical; only the metadata boxes are rewritten.
-                stripped = strip_metadata(destination_path)
                 src = source_path.name.ljust(pad)
-                suffix = "HEIF, no re-encode" if stripped else "HEIF, no re-encode; METADATA NOT STRIPPED"
-                print(f"{counter_str}✓ Passed    {src} → {new_filename} ({suffix})")
+                if not strip_metadata(destination_path):
+                    print(f"{counter_str}✗ Failed    {src} → {new_filename} (HEIF copied; METADATA NOT STRIPPED)")
+                    return "Failed", "exiftool could not strip metadata"
+                print(f"{counter_str}✓ Passed    {src} → {new_filename} (HEIF, no re-encode)")
                 return "Passed", None
 
             # Otherwise, proceed with full conversion
