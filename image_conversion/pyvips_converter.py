@@ -16,7 +16,7 @@ from config import (
     RAW_HEIF_EFFORT,
     RAW_HEIF_QUALITY,
 )
-from exif_utils import get_image_datetime, is_samsung_device
+from exif_utils import get_image_datetime
 from filename_utils import FilenameManager
 from format_utils import HEIF, RAW, detect_kind
 from metadata_utils import strip_metadata
@@ -25,16 +25,14 @@ from metadata_utils import strip_metadata
 class PyVipsImageConverter:
     """Handles image conversion to JPEG using pyvips for better performance."""
 
-    def __init__(self, filename_manager: FilenameManager, samsung_rename_only: bool = False, max_name_len: int = 0):
+    def __init__(self, filename_manager: FilenameManager, max_name_len: int = 0):
         """Initialize the pyvips image converter.
 
         Args:
             filename_manager: FilenameManager instance for handling filenames
-            samsung_rename_only: If True, Samsung images are only renamed, not converted
             max_name_len: Max source filename length used to align terminal output columns
         """
         self.filename_manager = filename_manager
-        self.samsung_rename_only = samsung_rename_only
         self.max_name_len = max_name_len
 
     @staticmethod
@@ -52,9 +50,7 @@ class PyVipsImageConverter:
             return "heif"
         return "jpg"
 
-    def _process_with_pyvips(
-        self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
-    ) -> None:
+    def _process_with_pyvips(self, source_path: Path, destination_path: Path, sequential: bool = True) -> None:
         if detect_kind(source_path) == RAW:
             # Full demosaic at 16 bits, encoded to 10-bit HEIF. libvips maps the full
             # ushort 0-65535 range into the target bit depth itself, so the array is
@@ -96,8 +92,6 @@ class PyVipsImageConverter:
 
         try:
             img = img.icc_transform("srgb")
-            if is_samsung:
-                img = img.gamma(1.1)
         except Exception:
             if img.interpretation != "srgb":
                 if img.bands >= 3:
@@ -130,9 +124,6 @@ class PyVipsImageConverter:
             with Image.open(source_path) as pil_img:
                 dt, datetime_display = get_image_datetime(pil_img)
 
-                # Check if image is from Samsung
-                is_samsung = is_samsung_device(pil_img)
-
             # Determine output filename
             ext = self._output_ext(source_path)
             if self.filename_manager.is_valid_format(source_path.name):
@@ -145,17 +136,6 @@ class PyVipsImageConverter:
             pad = self.max_name_len
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
-
-            # If Samsung rename-only mode is enabled and image is from Samsung, just copy/rename
-            if self.samsung_rename_only and is_samsung:
-                shutil.copy2(source_path, destination_path)
-
-                if source_path.name != new_filename:
-                    src = source_path.name.ljust(pad)
-                    print(f"{counter_str}✓ Renamed   {src} → {new_filename} (Samsung, no conversion)")
-                    return "Renamed", None
-                print(f"{counter_str}✓ Copied    {source_path.name} (Samsung, no conversion)")
-                return "Copied", None
 
             # A .heic file is already a valid HEIF container -- copy the bytes and rename,
             # no decode or re-encode. _output_ext has already confirmed the ftyp brand.
@@ -174,14 +154,14 @@ class PyVipsImageConverter:
             # Otherwise, proceed with full conversion
             if detect_kind(source_path) == RAW:
                 # RAW format loaders in libvips don't support sequential access
-                self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+                self._process_with_pyvips(source_path, destination_path, sequential=False)
             else:
                 try:
-                    self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=True)
+                    self._process_with_pyvips(source_path, destination_path, sequential=True)
                 except pyvips.Error as e:
                     if "out of order" in str(e).lower():
                         # Some JPEGs have non-sequential scan patterns; retry with full load into RAM
-                        self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+                        self._process_with_pyvips(source_path, destination_path, sequential=False)
                     else:
                         raise
 

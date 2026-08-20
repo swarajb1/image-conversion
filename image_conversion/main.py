@@ -98,15 +98,9 @@ def parse_arguments() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         prog="image-conversion",
-        description="Convert image and video files to JPEG and MP4 formats with optional Samsung image renaming.",
-        epilog="Example usage:\n  python main.py                      # Convert all files\n  python main.py --samsung-rename     # Rename Samsung images only\n  python main.py --help               # Show this help message",
+        description="Convert image and video files to JPEG and MP4 formats.",
+        epilog="Example usage:\n  python main.py                      # Convert all files\n  python main.py --help               # Show this help message",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    parser.add_argument(
-        "--samsung-rename",
-        action="store_true",
-        help="Rename Samsung images only without performing conversion (useful for organizing Samsung JPEG files)",
     )
 
     parser.add_argument(
@@ -124,17 +118,13 @@ def main() -> None:
     """Main function to process all image and video files in the source folder."""
     # Parse and validate command-line arguments
     try:
-        args = parse_arguments()
+        parse_arguments()
     except SystemExit as e:
         if e.code != 0:
             sys.exit(e.code)
         sys.exit(0)
 
     check_exiftool()
-
-    samsung_rename_only = args.samsung_rename
-    if samsung_rename_only:
-        print("Mode: Samsung images will be renamed only (no conversion)\n")
 
     if not SOURCE_FOLDER.exists():
         print(f"Error: Source folder '{SOURCE_FOLDER}' does not exist")
@@ -157,21 +147,13 @@ def main() -> None:
     # Process images
     if image_files:
         print("=== Processing Images ===")
-        image_converter = PyVipsImageConverter(
-            filename_manager, samsung_rename_only=samsung_rename_only, max_name_len=max_name_len
-        )
+        image_converter = PyVipsImageConverter(filename_manager, max_name_len=max_name_len)
         for idx, source_file in enumerate(image_files, 1):
             # Route on what the file is, not what it is named. Tools like Picasa rewrite
             # a DNG as JPEG while keeping the .dng name, which would otherwise reach rawpy.
-            # The copy+strip shortcut only applies when the converter has nothing else to
-            # contribute: Samsung rename mode and the already-correct-name check both live
-            # there, and skipping it would silently disable them.
-            fast_path = (
-                detect_kind(source_file) == JPEG
-                and not samsung_rename_only
-                and not filename_manager.is_valid_format(source_file.name)
-            )
-            if fast_path:
+            # A file already named IMG_<date>.jpg keeps that name, and only the converter
+            # knows how to check for it, so it does not take the shortcut.
+            if detect_kind(source_file) == JPEG and not filename_manager.is_valid_format(source_file.name):
                 action, error = _handle_existing_jpg(
                     source_file, idx, len(image_files), filename_manager, max_name_len
                 )

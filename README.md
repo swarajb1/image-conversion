@@ -13,7 +13,6 @@ A production-ready Python batch converter for images and videos with intelligent
 - **Metadata Handling**: Identification metadata stripped via ExifTool (JPG) or PyVips `strip=True` (others)
 - **Progressive JPEG**: Uses progressive encoding for better compression
 - **Duplicate Handling**: Automatically appends suffixes for files with identical timestamps
-- **Samsung Mode**: Optional `--samsung-rename` flag to rename Samsung images without conversion
 
 ### Video Processing
 - **Format Support**: MOV, AVI, MKV, FLV, WMV → MP4 (H.264 with AAC audio); MP4 renamed in-place
@@ -106,20 +105,6 @@ poetry shell
    ```bash
    ls files/converted/
    ```
-
-### Special Modes
-
-#### Samsung Image Rename-Only Mode
-To rename Samsung images without conversion (preserves original quality):
-```bash
-python -m image_conversion.main --samsung-rename
-```
-This mode:
-- Detects Samsung devices via EXIF Make/Model tags
-- Renames Samsung images with standardized filenames
-- Skips conversion entirely (no re-encoding)
-- Preserves original quality and ICC profiles
-- Converts non-Samsung images as usual
 
 ### Directory Structure
 
@@ -223,7 +208,6 @@ Handles image conversion:
 - Converts to RGB mode if necessary
 - Saves as optimized progressive JPEG with 4:4:4 chroma subsampling
 - Generates standardized filenames
-- Supports Samsung rename-only mode for quality preservation
 
 #### `video_converter.py` (VideoConverter class)
 Handles video conversion:
@@ -257,37 +241,46 @@ High-performance image conversion using pyvips:
 - Applies EXIF orientation correction with autorot()
 - Handles alpha channel flattening for RGBA images
 - Applies ICC color space transformation to sRGB
-- Includes Samsung-specific gamma adjustment (1.1 lift)
 - Saves as JPEG with 4:4:4 chroma subsampling (highest quality)
-- Supports Samsung rename-only mode
-- Metadata is stripped for privacy (except during rename-only mode)
+- Metadata is stripped for privacy on every path (encoder `strip=True`, or ExifTool when nothing is re-encoded)
 
 ## 📊 Processing Flow
 
 ### Image Processing (`main.py`)
 
+Routing is by `detect_kind()` — the file's magic bytes, never its extension.
+
 ```
-                         Source Image
-                              │
-             ┌────────────────┴────────────────┐
-             │                                 │
-         JPG / JPEG                      Other formats
-             │                                 │
-             ▼                    ┌────────────┴────────────┐
-  ┌─────────────────────┐    Samsung rename-only       Not Samsung
-  │  1. Read EXIF date  │         (flag on)                 │
-  │  2. Copy to dest    │              │                     ▼
-  │  3. Rename to IMG_  │              ▼          ┌─────────────────────┐
-  │  4. ExifTool strip  │      ┌─────────────┐    │  PyVips: convert    │
-  └──────────┬──────────┘      │ Copy+rename │    │  to JPEG + strip    │
-             │                 └──────┬──────┘    └──────────┬──────────┘
-             └────────────────────────┴───────────────────────┘
-                                      │
-                                      ▼
-                          ┌───────────────────────────┐
-                          │  IMG_YYYYMMDD_HHMMSS.jpg  │
-                          └───────────────────────────┘
+                              Source Image
+                                   │
+                                   ▼
+                         ┌───────────────────┐
+                         │   detect_kind()   │
+                         └─────────┬─────────┘
+             ┌───────────────┬─────┴─────┬───────────────┐
+             │               │           │               │
+           JPEG            HEIF         RAW            other
+      (not already      (.heic /       (.dng)       (png, tiff,
+       IMG_<date>)       .heif)          │           webp, JPEG
+             │               │           │           already named)
+             ▼               ▼           ▼               ▼
+    ┌────────────────┐ ┌───────────┐ ┌──────────┐ ┌────────────────┐
+    │ copy bytes     │ │ copy      │ │ rawpy    │ │ pyvips decode  │
+    │ ExifTool strip │ │ bytes     │ │ 16-bit   │ │ autorot, sRGB  │
+    │ (named fields) │ │ ExifTool  │ │ demosaic │ │ jpegsave       │
+    │                │ │ -all=     │ │ heifsave │ │ strip=True     │
+    │                │ │           │ │ 10-bit   │ │                │
+    └───────┬────────┘ └─────┬─────┘ └────┬─────┘ └───────┬────────┘
+         Stripped         Passed      Converted        Converted
+            │                │             │               │
+            ▼                ▼             ▼               ▼
+     IMG_<date>.jpg    IMG_<date>.heif  IMG_<date>.heif  IMG_<date>.jpg
 ```
+
+Only the two middle branches avoid a re-encode. Because neither runs an encoder,
+neither gets the encoder's implicit `strip=True`, so ExifTool has to do it — and
+HEIF needs `-all=`, since field-by-field clearing misses Apple's ItemProperties
+copy of GPS and device identity.
 
 ### Video Processing (`main.py`)
 
@@ -296,15 +289,23 @@ High-performance image conversion using pyvips:
                               │
              ┌────────────────┴────────────────┐
              │                                 │
-            MP4                          Other formats
+  MP4, not already                Other formats
+    VID_<date>.mp4
              │                                 │
              ▼                                 ▼
   ┌─────────────────────┐          ┌─────────────────────┐
-  │  1. Read date       │          │  FFmpeg: re-encode  │
-  │  2. Copy to dest    │          │  H.264 / AAC        │
+  │  1. Read date       │          │  FFmpeg stream copy │
+  │  2. Copy to dest    │          │  -c copy (remux)    │
   │  3. Rename to VID_  │          │  -map_metadata -1   │
-  │  4. ExifTool strip  │          └──────────┬──────────┘
-  └──────────┬──────────┘                     │
+  │  4. ExifTool strip  │          │  + ExifTool strip   │
+  └──────────┬──────────┘          └──────────┬──────────┘
+             │                        unmuxable│codecs
+             │                                 ▼
+             │                     ┌─────────────────────┐
+             │                     │  FFmpeg: re-encode  │
+             │                     │  H.264 / AAC        │
+             │                     │  -map_metadata -1   │
+             │                     └──────────┬──────────┘
              └─────────────────┬──────────────┘
                                │
                                ▼
@@ -316,10 +317,6 @@ High-performance image conversion using pyvips:
 ## 💡 Advanced Usage
 
 ### Command-Line Options
-- `--samsung-rename`: Rename Samsung images without conversion (preserves quality)
-  ```bash
-  python -m image_conversion.main --samsung-rename
-  ```
 
 ### Custom Quality Settings
 Modify `JPEG_QUALITY` in `config.py`:
@@ -333,7 +330,6 @@ Modify `JPEG_QUALITY` in `config.py`:
 The converter now preserves ICC color profiles:
 - Extracts ICC profiles from source images
 - Applies ICC transform to sRGB color space during conversion
-- Samsung images get a mild gamma lift (1.1) to counter HDR loss
 - Results in more accurate color reproduction in the output JPEG
 
 ## 🔍 Metadata Handling
@@ -574,7 +570,5 @@ ffprobe files/converted/VID_*.mp4
 **Recent Changes (v0.2.0):**
 - Added PyVipsImageConverter for high-performance image processing
 - Implemented ICC profile preservation for accurate color reproduction
-- Added Samsung image rename-only mode (`--samsung-rename` flag)
 - Improved JPEG quality settings (95 default with 4:4:4 chroma subsampling)
-- Added Samsung-specific gamma adjustment for HDR loss compensation
 - Enhanced color space handling with ICC transform to sRGB
