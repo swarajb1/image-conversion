@@ -24,6 +24,17 @@ RAW = "raw"
 OTHER = "other"
 
 
+def content_ext(path: Path) -> str:
+    """Extension matching the file's real format, falling back to its own suffix.
+
+    ExifTool refuses to touch a file whose extension contradicts its bytes ("Not a valid
+    JPG (looks more like a PNG)"), so even a copy that is never re-encoded has to be named
+    for what it actually is. RAW and OTHER keep the source suffix: there is no single
+    extension they map to.
+    """
+    return {JPEG: "jpg", HEIF: "heif", PNG: "png"}.get(detect_kind(path), path.suffix.lower().lstrip("."))
+
+
 def detect_kind(path: Path) -> str:
     """Identify a file from its leading bytes, ignoring its extension.
 
@@ -51,36 +62,37 @@ def detect_kind(path: Path) -> str:
 
 
 if __name__ == "__main__":
-    # Self-check against the real samples: poetry run python image_conversion/format_utils.py
+    # Self-check: poetry run python image_conversion/format_utils.py
     #
-    # PIL decodes independently of this module, so if it disagrees then detect_kind
-    # would route the file to a branch that cannot read it -- which is the whole
-    # failure this module exists to prevent. Extensions are deliberately never
-    # consulted here: distrusting them is the point.
-    from collections import Counter
+    # Header bytes only -- no sample library needed, so this runs in any clone. The
+    # cases that matter are the ones where the name and the bytes disagree, because
+    # trusting the name is the failure this module exists to prevent.
+    import tempfile
 
-    import pillow_heif
-    from PIL import Image
+    CASES = [
+        ("shot.dng", b"\xff\xd8\xff\xe0" + b"\x00" * 8, JPEG),  # JPEG wearing a .dng name
+        ("shot.jpg", b"\xff\xd8\xff\xdb" + b"\x00" * 8, JPEG),
+        ("shot.jpg", PNG_MAGIC + b"\x00" * 4, PNG),  # PNG wearing a .jpg name
+        ("shot.heic", b"\x00\x00\x00\x18ftypheic", HEIF),
+        ("shot.heic", b"\x00\x00\x00\x18ftypqt  ", OTHER),  # ftyp, but not a HEIF brand
+        ("shot.dng", b"II*\x00" + b"\x00" * 8, RAW),
+        ("scan.tif", b"II*\x00" + b"\x00" * 8, OTHER),  # TIFF magic, but not a RAW extension
+        ("clip.mp4", b"\x00\x00\x00\x18ftypmp42", OTHER),
+        ("empty.jpg", b"", OTHER),
+    ]
 
-    pillow_heif.register_heif_opener()
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, header, expected in CASES:
+            path = Path(tmp) / name
+            path.write_bytes(header)
+            got = detect_kind(path)
+            assert got == expected, f"{name} ({header[:8]!r}): expected {expected}, got {got}"
 
-    # RAW is absent because PIL does not decode raw; videos and anything else land
-    # in OTHER, which makes no claim worth checking.
-    PIL_FORMATS = {JPEG: {"JPEG", "MPO"}, HEIF: {"HEIF"}, PNG: {"PNG"}}
+        # A name that contradicts the bytes is renamed for the bytes; anything the
+        # detector cannot name keeps its own suffix.
+        assert content_ext(Path(tmp) / "shot.jpg") == "png"
+        assert content_ext(Path(tmp) / "shot.dng") == "dng"
+        assert content_ext(Path(tmp) / "clip.mp4") == "mp4"
 
-    counts: Counter = Counter()
-    for sample in sorted(Path("files/to_convert").glob("*")):
-        if not sample.is_file():
-            continue
-        kind = detect_kind(sample)
-        counts[kind] += 1
-        expected = PIL_FORMATS.get(kind)
-        if expected is None:
-            continue
-        with Image.open(sample) as img:
-            assert img.format in expected, f"{sample.name}: detect_kind said {kind}, PIL says {img.format}"
-
-    assert counts, "no sample files found -- run from the repository root"
-    for kind, n in sorted(counts.items()):
-        print(f"{kind:<6} {n:>4}")
-    print("detect_kind agrees with PIL on every decodable sample")
+    assert detect_kind(Path(tmp) / "gone.jpg") == OTHER  # unreadable path falls back safely
+    print(f"ok  detect_kind agrees with the bytes on {len(CASES)} cases")

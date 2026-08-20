@@ -394,8 +394,8 @@ Supports timezone formats:
 
 ## 🔏 Metadata Stripper (format-preserving)
 
-`main_1.py` is an alternative entry point that **renames files by capture date and strips identification
-metadata without converting formats**. Every file is copied to `files/converted/` with a standardised
+`--no-convert` is a mode of the normal entry point that **renames files by capture date and strips
+identification metadata without converting formats**. Every file is copied to `files/converted/` with a standardised
 date-based filename and its original format preserved; ExifTool then removes the identifying fields from
 the copy. The original in `files/to_convert/` is never modified.
 
@@ -411,7 +411,7 @@ brew install exiftool
 sudo apt install libimage-exiftool-perl
 ```
 
-### Processing Flow (`main_1.py`)
+### Processing Flow (`--no-convert`)
 
 ```
                          Source File
@@ -461,14 +461,14 @@ sudo apt install libimage-exiftool-perl
 ### Usage
 
 ```bash
-poetry run python -m image_conversion.main_1
+poetry run python -m image_conversion.main --no-convert
 ```
 
 ### What it strips
 
 | Category | Fields removed |
 |----------|---------------|
-| Location | `GPSLatitude`, `GPSLongitude`, `GPSAltitude`, `GPSImgDirection`, `GPSSpeed`, `GPSTrack`, `GPSDateStamp`, `GPSTimeStamp`, `GPSDestLatitude`, `GPSDestLongitude`, `LocationCreated`, `City`, `Province-State`, `Country`, `Sub-location` |
+| Location | `GPSLatitude`, `GPSLongitude`, `GPSAltitude`, `GPSImgDirection`, `GPSSpeed`, `GPSTrack`, `GPSDateStamp`, `GPSTimeStamp`, `GPSDestLatitude`, `GPSDestLongitude`, `GPSCoordinates`, `GPSPosition`, `LocationCreated`, `City`, `Province-State`, `Country`, `Sub-location` |
 | Device identity | `Make`, `Model`, `SerialNumber`, `LensSerialNumber`, `LensMake`, `LensModel`, `OwnerName`, `CameraOwnerName` |
 | Timestamps | `DateTimeOriginal`, `CreateDate`, `ModifyDate`, `MediaCreateDate`, `MediaModifyDate`, `TrackCreateDate`, `TrackModifyDate`, `CreationTime` |
 | Person / identity | `Artist`, `Creator`, `Copyright`, `PersonInImage`, `By-line`, `Contact` |
@@ -479,9 +479,9 @@ poetry run python -m image_conversion.main_1
 ExifTool clears each field across all metadata groups (EXIF, XMP, IPTC, QuickTime) in a single pass, so
 Apple-specific atoms in iPhone videos and proprietary maker-note tags are covered alongside standard EXIF.
 
-### Comparison with `main.py`
+### Comparison with the default mode
 
-| | `main.py` | `main_1.py` |
+| | default | `--no-convert` |
 |---|---|---|
 | Output format | JPEG (images) / MP4 (videos) | Original format unchanged |
 | Filename | Standardized `IMG_` / `VID_` by date | Standardized `IMG_` / `VID_` by date |

@@ -130,9 +130,13 @@ class PyVipsImageConverter:
                 dt, datetime_display = get_image_datetime(pil_img)
 
             # Determine output filename
+            # An already-standard name is kept only when it does not lie about the content:
+            # a PNG called IMG_<date>.jpg would otherwise be copied out under an extension
+            # that does not match its bytes.
             ext = self._output_ext(source_path)
-            if self.filename_manager.is_valid_format(source_path.name):
+            if self.filename_manager.is_valid_format(source_path.name) and source_path.suffix.lower() == f".{ext}":
                 new_filename = source_path.name
+                self.filename_manager.used_filenames.add(new_filename)
             else:
                 new_filename = self.filename_manager.determine_output_filename(source_path, dt, ext)
 

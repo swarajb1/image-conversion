@@ -17,6 +17,10 @@ IDENTIFICATION_FIELDS = [
     "GPSTimeStamp",
     "GPSDestLatitude",
     "GPSDestLongitude",
+    # QuickTime keeps its location in com.apple.quicktime.location.ISO6709 / ©xyz, which
+    # ExifTool names GPSCoordinates -- the GPSLatitude/GPSLongitude pair never reaches it.
+    "GPSCoordinates",
+    "GPSPosition",
     "LocationCreated",
     "City",
     "Province-State",
@@ -104,4 +108,8 @@ if __name__ == "__main__":
     jpg = _strip_command(Path("a.jpg"))
     assert "-all=" not in jpg
     assert "-GPSLatitude=" in jpg and "-Make=" in jpg
+
+    # Videos take the same field-by-field branch, so the QuickTime location tag has to be
+    # in the shared list or an MP4 leaves with its GPS intact.
+    assert "-GPSCoordinates=" in _strip_command(Path("a.mp4"))
     print(f"ok  HEIF/PNG use -all=, other formats clear {len(IDENTIFICATION_FIELDS)} named fields")

@@ -140,12 +140,13 @@ class FilenameManager:
         # Always generate new filename based on datetime metadata
         return self.generate_filename(dt, source_path.name, ext)
 
-    def determine_video_output_filename(self, source_path: Path, dt: datetime | None) -> str:
+    def determine_video_output_filename(self, source_path: Path, dt: datetime | None, ext: str = "mp4") -> str:
         """Determine the appropriate output filename for videos.
 
         Args:
             source_path: Path to the source video file
             dt: datetime object from video metadata, or None
+            ext: output file extension without the leading dot
 
         Returns:
             str: The output filename to use
@@ -154,9 +155,9 @@ class FilenameManager:
         if self.is_datetime_only_format(source_path.name):
             # Add VID_ prefix to the existing filename
             stem = source_path.stem  # e.g., "20251207_175000"
-            new_filename = f"VID_{stem}.mp4"
+            new_filename = f"VID_{stem}.{ext}"
             self.used_filenames.add(new_filename)
             return new_filename
 
         # Always generate new filename based on datetime metadata
-        return self.generate_video_filename(dt, source_path.name)
+        return self.generate_video_filename(dt, source_path.name, ext)

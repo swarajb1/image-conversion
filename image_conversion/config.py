@@ -64,5 +64,6 @@ FILENAME_PATTERN = r"^IMG_\d{8}_\d{6}(_noexif)?(-\d+)?\.(jpg|heif|png)$"
 VIDEO_FILENAME_PATTERN = r"^VID_\d{8}_\d{6}(_nometa)?(-\d+)?\.mp4$"
 
 # Pattern for datetime-only filenames (without IMG_ or VID_ prefix)
-# Format: YYYYMMDD_HHMMSS.jpg, YYYYMMDD_HHMMSS.heif, YYYYMMDD_HHMMSS.png or YYYYMMDD_HHMMSS.mp4
-DATETIME_ONLY_PATTERN = r"^\d{8}_\d{6}\.(jpg|heif|png|mp4)$"
+# Format: YYYYMMDD_HHMMSS.<ext> -- any extension, because --no-convert keeps the source
+# container (.heic stays .heic, .mov stays .mov) and still wants the prefix added.
+DATETIME_ONLY_PATTERN = r"^\d{8}_\d{6}\.[A-Za-z0-9]+$"
