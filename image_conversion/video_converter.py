@@ -173,13 +173,17 @@ class VideoConverter:
             return False
         return True
 
-    def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> None:
+    def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> tuple[str, str | None]:
         """Convert any video format to MP4 with progress bar.
 
         Args:
             source_path: Path to the source video file
             current: Current file number (for progress display)
             total: Total number of files (for progress display)
+
+        Returns:
+            (action, error) where action is the label printed for this file and error is
+            the failure message, or None on success
         """
         try:
             # Get video metadata
@@ -206,7 +210,7 @@ class VideoConverter:
                 counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
                 src = source_path.name.ljust(pad)
                 print(f"{counter_str}✓ Remuxed   {src} → {output_filename}")
-                return
+                return "Remuxed", None
 
             # Get video duration for progress tracking
             duration = self._get_video_duration(source_path)
@@ -290,19 +294,24 @@ class VideoConverter:
             if process.returncode == 0:
                 src = source_path.name.ljust(pad)
                 print(f"{counter_str}✓ Converted {src} → {output_filename}")
-            else:
-                # Read any remaining stderr
-                if process.stderr:
-                    stderr = process.stderr.read()
-                    print(f"{counter_str}✗ Failed    {source_path.name}: {stderr}")
-                else:
-                    print(f"{counter_str}✗ Failed    {source_path.name}")
+                return "Converted", None
+
+            # Read any remaining stderr
+            if process.stderr:
+                stderr = process.stderr.read()
+                print(f"{counter_str}✗ Failed    {source_path.name}: {stderr}")
+                return "Failed", stderr
+
+            print(f"{counter_str}✗ Failed    {source_path.name}")
+            return "Failed", f"ffmpeg exited with code {process.returncode}"
 
         except subprocess.CalledProcessError as e:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             print(f"{counter_str}✗ Failed    {source_path.name}: {e.stderr}")
+            return "Failed", str(e.stderr)
         except Exception as e:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             print(f"{counter_str}✗ Failed    {source_path.name}: {e}")
+            return "Failed", str(e)

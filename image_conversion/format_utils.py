@@ -47,19 +47,35 @@ def detect_kind(path: Path) -> str:
 
 if __name__ == "__main__":
     # Self-check against the real samples: poetry run python image_conversion/format_utils.py
-    # The .dng entry expects JPEG because these particular samples were rewritten by
-    # Picasa. Add a genuine DNG and this assertion must be updated.
-    expected = {".heic": HEIF, ".jpg": JPEG, ".dng": JPEG}
+    #
+    # PIL decodes independently of this module, so if it disagrees then detect_kind
+    # would route the file to a branch that cannot read it -- which is the whole
+    # failure this module exists to prevent. Extensions are deliberately never
+    # consulted here: distrusting them is the point.
+    from collections import Counter
 
-    checked = 0
+    import pillow_heif
+    from PIL import Image
+
+    pillow_heif.register_heif_opener()
+
+    # RAW is absent because PIL does not decode raw; videos and anything else land
+    # in OTHER, which makes no claim worth checking.
+    PIL_FORMATS = {JPEG: {"JPEG", "MPO"}, HEIF: {"HEIF"}}
+
+    counts: Counter = Counter()
     for sample in sorted(Path("files/to_convert").glob("*")):
-        want = expected.get(sample.suffix.lower())
-        if want is None:
+        if not sample.is_file():
             continue
-        got = detect_kind(sample)
-        assert got == want, f"{sample.name}: expected {want}, got {got}"
-        print(f"ok  {sample.name:<28} -> {got}")
-        checked += 1
+        kind = detect_kind(sample)
+        counts[kind] += 1
+        expected = PIL_FORMATS.get(kind)
+        if expected is None:
+            continue
+        with Image.open(sample) as img:
+            assert img.format in expected, f"{sample.name}: detect_kind said {kind}, PIL says {img.format}"
 
-    assert checked, "no sample files found -- run from the repository root"
-    print(f"all {checked} format detections correct")
+    assert counts, "no sample files found -- run from the repository root"
+    for kind, n in sorted(counts.items()):
+        print(f"{kind:<6} {n:>4}")
+    print("detect_kind agrees with PIL on every decodable sample")

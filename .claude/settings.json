@@ -6,5 +6,12 @@
             "Bash(pre-commit run:*)",
             "Bash(.venv/bin/ruff check:*)"
         ]
+    },
+    "sandbox": {
+        "filesystem": {
+            "allowRead": [
+                "."
+            ]
+        }
     }
 }

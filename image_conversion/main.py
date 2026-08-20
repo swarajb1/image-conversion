@@ -4,6 +4,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pillow_heif
@@ -15,6 +16,7 @@ from filename_utils import FilenameManager
 from format_utils import JPEG, detect_kind
 from metadata_utils import strip_metadata
 from pyvips_converter import PyVipsImageConverter
+from stats import RunStats
 
 # from image_converter import ImageConverter
 from video_converter import VideoConverter
@@ -38,7 +40,9 @@ def check_exiftool() -> None:
         sys.exit(1)
 
 
-def _handle_existing_jpg(source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int) -> None:
+def _handle_existing_jpg(
+    source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
+) -> tuple[str, str | None]:
     """Rename a source JPG by capture date and strip its identification metadata."""
     try:
         with Image.open(source) as img:
@@ -56,11 +60,15 @@ def _handle_existing_jpg(source: Path, current: int, total: int, fm: FilenameMan
 
     if strip_metadata(dest):
         print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
-    else:
-        print(f"{counter} ✗ Failed    {src_col} → {output_name}")
+        return "Stripped", None
+
+    print(f"{counter} ✗ Failed    {src_col} → {output_name}")
+    return "Failed", "exiftool could not strip metadata"
 
 
-def _handle_existing_mp4(source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int) -> None:
+def _handle_existing_mp4(
+    source: Path, current: int, total: int, fm: FilenameManager, max_name_len: int
+) -> tuple[str, str | None]:
     """Rename a source MP4 by capture date and strip its identification metadata."""
     dt, _ = get_video_datetime(source)
     output_name = fm.determine_video_output_filename(source, dt)
@@ -73,8 +81,10 @@ def _handle_existing_mp4(source: Path, current: int, total: int, fm: FilenameMan
 
     if strip_metadata(dest):
         print(f"{counter} ✓ Stripped  {src_col} → {output_name}")
-    else:
-        print(f"{counter} ✗ Failed    {src_col} → {output_name}")
+        return "Stripped", None
+
+    print(f"{counter} ✗ Failed    {src_col} → {output_name}")
+    return "Failed", "exiftool could not strip metadata"
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -162,6 +172,8 @@ def main() -> None:
 
     filename_manager = FilenameManager()
     max_name_len = max((len(f.name) for f in image_files + video_files), default=0)
+    stats = RunStats()
+    start = time.monotonic()
 
     # Process images
     if image_files:
@@ -173,9 +185,12 @@ def main() -> None:
             # Route on what the file is, not what it is named. Tools like Picasa rewrite
             # a DNG as JPEG while keeping the .dng name, which would otherwise reach rawpy.
             if detect_kind(source_file) == JPEG:
-                _handle_existing_jpg(source_file, idx, len(image_files), filename_manager, max_name_len)
+                action, error = _handle_existing_jpg(
+                    source_file, idx, len(image_files), filename_manager, max_name_len
+                )
             else:
-                image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
+                action, error = image_converter.convert_to_jpeg(source_file, current=idx, total=len(image_files))
+            stats.record(stats.images, action, source_file.name, error)
         print()
 
     # Process videos
@@ -184,12 +199,15 @@ def main() -> None:
         video_converter = VideoConverter(filename_manager, max_name_len=max_name_len)
         for idx, source_file in enumerate(video_files, 1):
             if source_file.suffix.lower() == ".mp4":
-                _handle_existing_mp4(source_file, idx, len(video_files), filename_manager, max_name_len)
+                action, error = _handle_existing_mp4(
+                    source_file, idx, len(video_files), filename_manager, max_name_len
+                )
             else:
-                video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
+                action, error = video_converter.convert_to_mp4(source_file, current=idx, total=len(video_files))
+            stats.record(stats.videos, action, source_file.name, error)
         print()
 
-    print("Conversion complete!")
+    stats.print_summary(time.monotonic() - start)
 
 
 if __name__ == "__main__":

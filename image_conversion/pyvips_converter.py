@@ -177,13 +177,17 @@ class PyVipsImageConverter:
             subsample_mode="off",
         )
 
-    def convert_to_jpeg(self, source_path: Path, current: int = 0, total: int = 0) -> None:
+    def convert_to_jpeg(self, source_path: Path, current: int = 0, total: int = 0) -> tuple[str, str | None]:
         """Convert any image format to JPEG with datetime-based filename using pyvips.
 
         Args:
             source_path: Path to the source image file
             current: Current file number (for progress display)
             total: Total number of files (for progress display)
+
+        Returns:
+            (action, error) where action is the label printed for this file and error is
+            the failure message, or None on success
         """
         try:
             # Get datetime from EXIF data using PIL (for compatibility with existing code)
@@ -214,9 +218,9 @@ class PyVipsImageConverter:
                 if source_path.name != new_filename:
                     src = source_path.name.ljust(pad)
                     print(f"{counter_str}✓ Renamed   {src} → {new_filename} (Samsung, no conversion)")
-                else:
-                    print(f"{counter_str}✓ Copied    {source_path.name} (Samsung, no conversion)")
-                return
+                    return "Renamed", None
+                print(f"{counter_str}✓ Copied    {source_path.name} (Samsung, no conversion)")
+                return "Copied", None
 
             # A .heic file is already a valid HEIF container -- copy the bytes and rename,
             # no decode or re-encode. _output_ext has already confirmed the ftyp brand.
@@ -229,7 +233,7 @@ class PyVipsImageConverter:
                 src = source_path.name.ljust(pad)
                 suffix = "HEIF, no re-encode" if stripped else "HEIF, no re-encode; METADATA NOT STRIPPED"
                 print(f"{counter_str}✓ Passed    {src} → {new_filename} ({suffix})")
-                return
+                return "Passed", None
 
             # Otherwise, proceed with full conversion
             if detect_kind(source_path) == RAW:
@@ -248,10 +252,13 @@ class PyVipsImageConverter:
             if source_path.name != new_filename:
                 src = source_path.name.ljust(pad)
                 print(f"{counter_str}✓ Converted {src} → {new_filename}")
-            else:
-                print(f"{counter_str}✓ Processed {source_path.name} (already in correct format)")
+                return "Converted", None
+
+            print(f"{counter_str}✓ Processed {source_path.name} (already in correct format)")
+            return "Processed", None
 
         except Exception as e:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             print(f"{counter_str}✗ Failed    {source_path.name}: {e}")
+            return "Failed", str(e)
