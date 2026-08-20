@@ -57,12 +57,12 @@ AUDIO_BITRATE = "256k"  # High quality audio bitrate
 
 # Filename pattern for valid image names
 # Format: IMG_YYYYMMDD_HHMMSS.<ext> or IMG_YYYYMMDD_HHMMSS_noexif.<ext> (with optional -1, -2 suffix)
-FILENAME_PATTERN = r"^IMG_\d{8}_\d{6}(_noexif)?(-\d+)?\.(jpg|heif)$"
+FILENAME_PATTERN = r"^IMG_\d{8}_\d{6}(_noexif)?(-\d+)?\.(jpg|heif|png)$"
 
 # Filename pattern for valid video names
 # Format: VID_YYYYMMDD_HHMMSS.mp4 or VID_YYYYMMDD_HHMMSS_nometa.mp4 (with optional -1, -2 suffix)
 VIDEO_FILENAME_PATTERN = r"^VID_\d{8}_\d{6}(_nometa)?(-\d+)?\.mp4$"
 
 # Pattern for datetime-only filenames (without IMG_ or VID_ prefix)
-# Format: YYYYMMDD_HHMMSS.jpg, YYYYMMDD_HHMMSS.heif or YYYYMMDD_HHMMSS.mp4
-DATETIME_ONLY_PATTERN = r"^\d{8}_\d{6}\.(jpg|heif|mp4)$"
+# Format: YYYYMMDD_HHMMSS.jpg, YYYYMMDD_HHMMSS.heif, YYYYMMDD_HHMMSS.png or YYYYMMDD_HHMMSS.mp4
+DATETIME_ONLY_PATTERN = r"^\d{8}_\d{6}\.(jpg|heif|png|mp4)$"

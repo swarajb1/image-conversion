@@ -63,10 +63,12 @@ IDENTIFICATION_FIELDS = [
 ]
 
 
-# HEIC/HEIF files store metadata in both the standard EXIF block and Apple's
-# ItemProperties container. Field-by-field clearing only reaches the EXIF block, so
-# these need -all= to drop the ItemProperties copy of GPS/Make/Model as well.
-HEIF_EXTENSIONS = {".heic", ".heif"}
+# Formats where field-by-field clearing is not enough, so everything goes:
+#   HEIC/HEIF -- Apple keeps a second copy of GPS/Make/Model in its ItemProperties
+#                container, which named-tag clearing never reaches.
+#   PNG       -- metadata lives in free-form tEXt/iTXt/eXIf chunks, so there is no
+#                fixed set of tag names to enumerate.
+STRIP_ALL_EXTENSIONS = {".heic", ".heif", ".png"}
 
 
 def check_exiftool() -> None:
@@ -82,7 +84,7 @@ def check_exiftool() -> None:
 
 def _strip_command(path: Path) -> list[str]:
     """Build the ExifTool command that clears identification metadata from *path*."""
-    if path.suffix.lower() in HEIF_EXTENSIONS:
+    if path.suffix.lower() in STRIP_ALL_EXTENSIONS:
         return ["exiftool", "-overwrite_original", "-all=", str(path)]
     return ["exiftool", "-overwrite_original"] + [f"-{field}=" for field in IDENTIFICATION_FIELDS] + [str(path)]
 
@@ -93,12 +95,13 @@ def strip_metadata(path: Path) -> bool:
 
 
 if __name__ == "__main__":
-    # Self-check: the HEIF branch is the one that must not regress -- field-by-field
-    # clearing leaves Apple's ItemProperties copy of GPS/Make/Model in place.
-    for name in ("a.heic", "a.HEIC", "a.heif"):
+    # Self-check: the -all= branch is the one that must not regress -- field-by-field
+    # clearing leaves Apple's ItemProperties copy of GPS/Make/Model, and every PNG
+    # text chunk, in place.
+    for name in ("a.heic", "a.HEIC", "a.heif", "a.png", "a.PNG"):
         assert "-all=" in _strip_command(Path(name)), name
 
     jpg = _strip_command(Path("a.jpg"))
     assert "-all=" not in jpg
     assert "-GPSLatitude=" in jpg and "-Make=" in jpg
-    print(f"ok  HEIF uses -all=, other formats clear {len(IDENTIFICATION_FIELDS)} named fields")
+    print(f"ok  HEIF/PNG use -all=, other formats clear {len(IDENTIFICATION_FIELDS)} named fields")

@@ -15,8 +15,11 @@ HEIF_FTYP_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim
 # TIFF byte-order marks -- DNG is a TIFF variant
 TIFF_MAGIC = (b"II*\x00", b"MM\x00*")
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
 JPEG = "jpeg"
 HEIF = "heif"
+PNG = "png"
 RAW = "raw"
 OTHER = "other"
 
@@ -24,8 +27,8 @@ OTHER = "other"
 def detect_kind(path: Path) -> str:
     """Identify a file from its leading bytes, ignoring its extension.
 
-    Returns one of JPEG, HEIF, RAW or OTHER. OTHER is the safe default: it routes to
-    the general pyvips encoder, which handles anything libvips can open.
+    Returns one of JPEG, HEIF, PNG, RAW or OTHER. OTHER is the safe default: it routes
+    to the general pyvips encoder, which handles anything libvips can open.
     """
     try:
         with path.open("rb") as handle:
@@ -37,6 +40,8 @@ def detect_kind(path: Path) -> str:
         return JPEG
     if len(header) == 12 and header[4:8] == b"ftyp" and header[8:12] in HEIF_FTYP_BRANDS:
         return HEIF
+    if header[:8] == PNG_MAGIC:
+        return PNG
     if header[:4] in TIFF_MAGIC and path.suffix.lower() in RAW_EXTENSIONS:
         # ponytail: DNG and plain TIFF share magic bytes, so the extension picks the
         # flavour once the content has confirmed the TIFF family. Telling them apart
@@ -61,7 +66,7 @@ if __name__ == "__main__":
 
     # RAW is absent because PIL does not decode raw; videos and anything else land
     # in OTHER, which makes no claim worth checking.
-    PIL_FORMATS = {JPEG: {"JPEG", "MPO"}, HEIF: {"HEIF"}}
+    PIL_FORMATS = {JPEG: {"JPEG", "MPO"}, HEIF: {"HEIF"}, PNG: {"PNG"}}
 
     counts: Counter = Counter()
     for sample in sorted(Path("files/to_convert").glob("*")):

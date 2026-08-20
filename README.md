@@ -5,7 +5,7 @@ A production-ready Python batch converter for images and videos with intelligent
 ## 📋 Features
 
 ### Image Processing
-- **Format Support**: HEIC, PNG, GIF, BMP, TIFF, WebP → JPEG; JPG/JPEG renamed in-place
+- **Format Support**: GIF, BMP, TIFF, WebP → JPEG; DNG → 10-bit HEIF; JPG, HEIC and PNG renamed in-place, never re-encoded
 - **EXIF Extraction**: Automatically reads creation timestamps from image metadata
 - **Orientation Correction**: Auto-corrects image rotation based on EXIF orientation tags
 - **ICC Profile Preservation**: Maintains color space information for accurate color reproduction
@@ -134,7 +134,7 @@ image-conversion/
 |--------|-----------|---------|
 | HEIC | .heic | ✅ Full support via pillow-heif |
 | JPEG | .jpg, .jpeg | ✅ Full support |
-| PNG | .png | ✅ Full support |
+| PNG | .png | ✅ Copied as-is (lossless; alpha preserved) |
 | GIF | .gif | ✅ Full support (converted to JPEG) |
 | BMP | .bmp | ✅ Full support |
 | TIFF | .tiff, .tif | ✅ Full support |
@@ -257,30 +257,38 @@ Routing is by `detect_kind()` — the file's magic bytes, never its extension.
                          ┌───────────────────┐
                          │   detect_kind()   │
                          └─────────┬─────────┘
-             ┌───────────────┬─────┴─────┬───────────────┐
-             │               │           │               │
-           JPEG            HEIF         RAW            other
-      (not already      (.heic /       (.dng)       (png, tiff,
-       IMG_<date>)       .heif)          │           webp, JPEG
-             │               │           │           already named)
-             ▼               ▼           ▼               ▼
-    ┌────────────────┐ ┌───────────┐ ┌──────────┐ ┌────────────────┐
-    │ copy bytes     │ │ copy      │ │ rawpy    │ │ pyvips decode  │
-    │ ExifTool strip │ │ bytes     │ │ 16-bit   │ │ autorot, sRGB  │
-    │ (named fields) │ │ ExifTool  │ │ demosaic │ │ jpegsave       │
-    │                │ │ -all=     │ │ heifsave │ │ strip=True     │
-    │                │ │           │ │ 10-bit   │ │                │
-    └───────┬────────┘ └─────┬─────┘ └────┬─────┘ └───────┬────────┘
-         Stripped         Passed      Converted        Converted
-            │                │             │               │
-            ▼                ▼             ▼               ▼
-     IMG_<date>.jpg    IMG_<date>.heif  IMG_<date>.heif  IMG_<date>.jpg
+             ┌───────────────┬─────┴─────┬───────────────────┐
+             │               │           │                   │
+           JPEG          HEIF / PNG     RAW                other
+      (not already      (.heic/.heif   (.dng)         (gif, tiff, bmp,
+       IMG_<date>)         / .png)                      webp, JPEG
+             │               │           │             already named)
+             ▼               ▼           ▼                   ▼
+    ┌────────────────┐ ┌───────────┐ ┌──────────┐  ┌────────────────┐
+    │ copy bytes     │ │ copy      │ │ rawpy    │  │ pyvips decode  │
+    │ ExifTool strip │ │ bytes     │ │ 16-bit   │  │ autorot, sRGB  │
+    │ (named fields) │ │ ExifTool  │ │ demosaic │  │ jpegsave       │
+    │                │ │ -all=     │ │ heifsave │  │ strip=True     │
+    │                │ │           │ │ 10-bit   │  │                │
+    └───────┬────────┘ └─────┬─────┘ └────┬─────┘  └───────┬────────┘
+         Stripped         Passed      Converted         Converted
+            │                │             │                │
+            ▼                ▼             ▼                ▼
+     IMG_<date>.jpg   IMG_<date>.heif  IMG_<date>.heif  IMG_<date>.jpg
+                      IMG_<date>.png
 ```
 
-Only the two middle branches avoid a re-encode. Because neither runs an encoder,
+Only the two left branches avoid a re-encode. Because neither runs an encoder,
 neither gets the encoder's implicit `strip=True`, so ExifTool has to do it — and
-HEIF needs `-all=`, since field-by-field clearing misses Apple's ItemProperties
-copy of GPS and device identity.
+HEIF and PNG need `-all=` rather than the named-field list: HEIF because
+field-by-field clearing misses Apple's ItemProperties copy of GPS and device
+identity, PNG because its metadata lives in free-form text chunks with no fixed
+tag names to enumerate.
+
+PNG is passed through rather than converted because it is the one lossless input
+format. Re-encoding it to JPEG discards that, flattens any alpha onto white, and
+usually *grows* the file, since the PNGs in a photo library are screenshots and
+graphics rather than photographs.
 
 ### Video Processing (`main.py`)
 
@@ -371,13 +379,11 @@ Supports timezone formats:
 
 **Images (using PyVipsImageConverter):**
 - HEIC to JPEG: ~100-200ms per image (faster than PIL)
-- PNG to JPEG: ~50-150ms per image (faster than PIL)
 - Batch of 50 photos: ~1-2 minutes
 - ICC profile processing overhead: negligible
 
 **Images (using ImageConverter - PIL):**
 - HEIC to JPEG: ~200-500ms per image
-- PNG to JPEG: ~100-300ms per image
 - Batch of 50 photos: ~2-3 minutes
 
 **Videos:**

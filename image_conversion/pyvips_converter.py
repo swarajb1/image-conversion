@@ -18,7 +18,7 @@ from config import (
 )
 from exif_utils import get_image_datetime
 from filename_utils import FilenameManager
-from format_utils import HEIF, RAW, detect_kind
+from format_utils import HEIF, PNG, RAW, detect_kind
 from metadata_utils import strip_metadata
 
 
@@ -48,6 +48,11 @@ class PyVipsImageConverter:
             return "heif"
         if kind == RAW:
             return "heif"
+        if kind == PNG:
+            # PNG is the one lossless input. Re-encoding it to JPEG throws that away,
+            # flattens any alpha onto white, and usually grows the file, because the
+            # PNGs in a photo library are screenshots and graphics, not photographs.
+            return "png"
         return "jpg"
 
     def _process_with_pyvips(self, source_path: Path, destination_path: Path, sequential: bool = True) -> None:
@@ -137,22 +142,25 @@ class PyVipsImageConverter:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
 
-            # A .heic file is already a valid HEIF container -- copy the bytes and rename,
-            # no decode or re-encode. _output_ext has already confirmed the ftyp brand.
-            if ext == "heif" and detect_kind(source_path) == HEIF:
+            # A .heic file is already a valid HEIF container and a PNG is already lossless
+            # -- copy the bytes and rename, no decode or re-encode. _output_ext has already
+            # confirmed the format, so the name and the branch that writes it agree.
+            kind = detect_kind(source_path)
+            if (ext == "heif" and kind == HEIF) or (ext == "png" and kind == PNG):
                 shutil.copy2(source_path, destination_path)
                 # There is no encoder on this path to apply strip=True, so the identification
                 # metadata every other output drops has to be removed explicitly. The pixels
                 # stay byte-identical; only the metadata boxes are rewritten.
+                label = kind.upper()
                 src = source_path.name.ljust(pad)
                 if not strip_metadata(destination_path):
-                    print(f"{counter_str}✗ Failed    {src} → {new_filename} (HEIF copied; METADATA NOT STRIPPED)")
+                    print(f"{counter_str}✗ Failed    {src} → {new_filename} ({label} copied; METADATA NOT STRIPPED)")
                     return "Failed", "exiftool could not strip metadata"
-                print(f"{counter_str}✓ Passed    {src} → {new_filename} (HEIF, no re-encode)")
+                print(f"{counter_str}✓ Passed    {src} → {new_filename} ({label}, no re-encode)")
                 return "Passed", None
 
             # Otherwise, proceed with full conversion
-            if detect_kind(source_path) == RAW:
+            if kind == RAW:
                 # RAW format loaders in libvips don't support sequential access
                 self._process_with_pyvips(source_path, destination_path, sequential=False)
             else:
