@@ -5,21 +5,20 @@ A production-ready Python batch converter for images and videos with intelligent
 ## 📋 Features
 
 ### Image Processing
-- **Format Support**: HEIC, PNG, GIF, BMP, TIFF, WebP, JPG/JPEG conversion to high-quality JPEG
+- **Format Support**: GIF, BMP, TIFF, WebP → JPEG; DNG → 10-bit HEIF; JPG, HEIC and PNG renamed in-place, never re-encoded
 - **EXIF Extraction**: Automatically reads creation timestamps from image metadata
 - **Orientation Correction**: Auto-corrects image rotation based on EXIF orientation tags
 - **ICC Profile Preservation**: Maintains color space information for accurate color reproduction
 - **High-Quality Chroma**: 4:4:4 chroma subsampling (no subsampling) for maximum quality
-- **Metadata Handling**: Preserves ICC profiles while removing other metadata for privacy
+- **Metadata Handling**: Identification metadata stripped via ExifTool (JPG) or PyVips `strip=True` (others)
 - **Progressive JPEG**: Uses progressive encoding for better compression
 - **Duplicate Handling**: Automatically appends suffixes for files with identical timestamps
-- **Samsung Mode**: Optional `--samsung-rename` flag to rename Samsung images without conversion
 
 ### Video Processing
-- **Format Support**: MOV, AVI, MKV, FLV, WMV → MP4 (H.264 with AAC audio)
+- **Format Support**: MOV, AVI, MKV, FLV, WMV → MP4 (H.264 with AAC audio); MP4 renamed in-place
 - **Metadata Extraction**: Extracts creation timestamps from video metadata (supports multiple formats)
 - **Real-time Progress**: Live progress bars with time estimates during conversion
-- **Metadata Stripping**: Removes all metadata for privacy
+- **Metadata Stripping**: All identification metadata removed — via ExifTool for MP4, FFmpeg `-map_metadata -1` for others
 - **Streaming Optimization**: Fast-start enabled for web streaming
 - **High-Quality Output**: CRF 18 visually lossless encoding with 256k audio
 
@@ -45,6 +44,7 @@ A production-ready Python batch converter for images and videos with intelligent
 - **Poetry**: For dependency management
 - **FFmpeg**: Required for video conversion (with ffprobe)
 - **libvips**: Required for high-performance image processing (PyVips)
+- **ExifTool**: Required for metadata stripping on JPG and MP4 files
 
 ### Optional
 - **macOS**: Recommended for best HEIF/HEIC support
@@ -53,12 +53,12 @@ A production-ready Python batch converter for images and videos with intelligent
 
 **macOS:**
 ```bash
-brew install ffmpeg vips
+brew install ffmpeg vips exiftool
 ```
 
 **Linux (Ubuntu/Debian):**
 ```bash
-sudo apt-get install ffmpeg libvips
+sudo apt-get install ffmpeg libvips libimage-exiftool-perl
 ```
 
 **Windows:**
@@ -106,20 +106,6 @@ poetry shell
    ls files/converted/
    ```
 
-### Special Modes
-
-#### Samsung Image Rename-Only Mode
-To rename Samsung images without conversion (preserves original quality):
-```bash
-python -m image_conversion.main --samsung-rename
-```
-This mode:
-- Detects Samsung devices via EXIF Make/Model tags
-- Renames Samsung images with standardized filenames
-- Skips conversion entirely (no re-encoding)
-- Preserves original quality and ICC profiles
-- Converts non-Samsung images as usual
-
 ### Directory Structure
 
 ```
@@ -148,7 +134,7 @@ image-conversion/
 |--------|-----------|---------|
 | HEIC | .heic | ✅ Full support via pillow-heif |
 | JPEG | .jpg, .jpeg | ✅ Full support |
-| PNG | .png | ✅ Full support |
+| PNG | .png | ✅ Copied as-is (lossless; alpha preserved) |
 | GIF | .gif | ✅ Full support (converted to JPEG) |
 | BMP | .bmp | ✅ Full support |
 | TIFF | .tiff, .tif | ✅ Full support |
@@ -208,7 +194,9 @@ Central configuration file for all settings, patterns, and constants.
 Application entry point that:
 - Scans source folder for images and videos
 - Collects and sorts files
-- Initializes converters
+- **JPG sources**: renamed by capture date + identification metadata stripped via ExifTool (no re-encoding)
+- **MP4 sources**: renamed by capture date + identification metadata stripped via ExifTool (no re-encoding)
+- All other formats: converted via PyVips (images) or FFmpeg (videos)
 - Orchestrates batch processing
 
 #### `image_converter.py` (ImageConverter class)
@@ -220,7 +208,6 @@ Handles image conversion:
 - Converts to RGB mode if necessary
 - Saves as optimized progressive JPEG with 4:4:4 chroma subsampling
 - Generates standardized filenames
-- Supports Samsung rename-only mode for quality preservation
 
 #### `video_converter.py` (VideoConverter class)
 Handles video conversion:
@@ -254,66 +241,90 @@ High-performance image conversion using pyvips:
 - Applies EXIF orientation correction with autorot()
 - Handles alpha channel flattening for RGBA images
 - Applies ICC color space transformation to sRGB
-- Includes Samsung-specific gamma adjustment (1.1 lift)
 - Saves as JPEG with 4:4:4 chroma subsampling (highest quality)
-- Supports Samsung rename-only mode
-- Metadata is stripped for privacy (except during rename-only mode)
+- Metadata is stripped for privacy on every path (encoder `strip=True`, or ExifTool when nothing is re-encoded)
 
 ## 📊 Processing Flow
 
-### Image Processing
+### Image Processing (`main.py`)
+
+Routing is by `detect_kind()` — the file's magic bytes, never its extension.
+
 ```
-Source Image
-    ↓
-Open & Extract EXIF
-    ↓
-Detect Device (Samsung or other)
-    ↓
-Samsung Rename-Only Mode?
-    ├─ YES: Rename & copy with original quality
-    └─ NO: Continue with conversion
-    ↓
-Correct Orientation
-    ↓
-Extract Creation Time (UTC→IST conversion if needed)
-    ↓
-Generate Standardized Filename
-    ↓
-Extract ICC Profile (color space info)
-    ↓
-Convert to RGB (if needed)
-    ↓
-Apply ICC Transform to sRGB (with Samsung gamma adjustment if needed)
-    ↓
-Save as Progressive JPEG (Quality 95, 4:4:4 chroma subsampling, Metadata Stripped)
-    ↓
-Output: IMG_YYYYMMDD_HHMMSS.jpg
+                              Source Image
+                                   │
+                                   ▼
+                         ┌───────────────────┐
+                         │   detect_kind()   │
+                         └─────────┬─────────┘
+             ┌───────────────┬─────┴─────┬───────────────────┐
+             │               │           │                   │
+           JPEG          HEIF / PNG     RAW                other
+      (not already      (.heic/.heif   (.dng)         (gif, tiff, bmp,
+       IMG_<date>)         / .png)                      webp, JPEG
+             │               │           │             already named)
+             ▼               ▼           ▼                   ▼
+    ┌────────────────┐ ┌───────────┐ ┌──────────┐  ┌────────────────┐
+    │ copy bytes     │ │ copy      │ │ rawpy    │  │ pyvips decode  │
+    │ ExifTool strip │ │ bytes     │ │ 16-bit   │  │ autorot, sRGB  │
+    │ (named fields) │ │ ExifTool  │ │ demosaic │  │ jpegsave       │
+    │                │ │ -all=     │ │ heifsave │  │ strip=True     │
+    │                │ │           │ │ 10-bit   │  │                │
+    └───────┬────────┘ └─────┬─────┘ └────┬─────┘  └───────┬────────┘
+         Stripped         Passed      Converted         Converted
+            │                │             │                │
+            ▼                ▼             ▼                ▼
+     IMG_<date>.jpg   IMG_<date>.heif  IMG_<date>.heif  IMG_<date>.jpg
+                      IMG_<date>.png
 ```
 
-### Video Processing
+Only the two left branches avoid a re-encode. Because neither runs an encoder,
+neither gets the encoder's implicit `strip=True`, so ExifTool has to do it — and
+HEIF and PNG need `-all=` rather than the named-field list: HEIF because
+field-by-field clearing misses Apple's ItemProperties copy of GPS and device
+identity, PNG because its metadata lives in free-form text chunks with no fixed
+tag names to enumerate.
+
+PNG is passed through rather than converted because it is the one lossless input
+format. Re-encoding it to JPEG discards that, flattens any alpha onto white, and
+usually *grows* the file, since the PNGs in a photo library are screenshots and
+graphics rather than photographs.
+
+### Video Processing (`main.py`)
+
 ```
-Source Video
-    ↓
-Check FFmpeg Availability
-    ↓
-Extract Metadata & Creation Time (UTC→IST conversion if needed)
-    ↓
-Get Video Duration (for progress calculation)
-    ↓
-Generate Standardized Filename
-    ↓
-Run FFmpeg Conversion with Progress Tracking
-    ↓
-Output: VID_YYYYMMDD_HHMMSS.mp4
+                         Source Video
+                              │
+             ┌────────────────┴────────────────┐
+             │                                 │
+  MP4, not already                Other formats
+    VID_<date>.mp4
+             │                                 │
+             ▼                                 ▼
+  ┌─────────────────────┐          ┌─────────────────────┐
+  │  1. Read date       │          │  FFmpeg stream copy │
+  │  2. Copy to dest    │          │  -c copy (remux)    │
+  │  3. Rename to VID_  │          │  -map_metadata -1   │
+  │  4. ExifTool strip  │          │  + ExifTool strip   │
+  └──────────┬──────────┘          └──────────┬──────────┘
+             │                        unmuxable│codecs
+             │                                 ▼
+             │                     ┌─────────────────────┐
+             │                     │  FFmpeg: re-encode  │
+             │                     │  H.264 / AAC        │
+             │                     │  -map_metadata -1   │
+             │                     └──────────┬──────────┘
+             └─────────────────┬──────────────┘
+                               │
+                               ▼
+                   ┌───────────────────────────┐
+                   │  VID_YYYYMMDD_HHMMSS.mp4  │
+                   └───────────────────────────┘
 ```
 
 ## 💡 Advanced Usage
 
 ### Command-Line Options
-- `--samsung-rename`: Rename Samsung images without conversion (preserves quality)
-  ```bash
-  python -m image_conversion.main --samsung-rename
-  ```
 
 ### Custom Quality Settings
 Modify `JPEG_QUALITY` in `config.py`:
@@ -327,7 +338,6 @@ Modify `JPEG_QUALITY` in `config.py`:
 The converter now preserves ICC color profiles:
 - Extracts ICC profiles from source images
 - Applies ICC transform to sRGB color space during conversion
-- Samsung images get a mild gamma lift (1.1) to counter HDR loss
 - Results in more accurate color reproduction in the output JPEG
 
 ## 🔍 Metadata Handling
@@ -354,6 +364,7 @@ Supports timezone formats:
 | Issue | Cause | Solution |
 |-------|-------|----------|
 | "FFmpeg not found" | FFmpeg not installed | Install FFmpeg (see Prerequisites) |
+| "exiftool not found" | ExifTool not installed | `brew install exiftool` / `apt install libimage-exiftool-perl` |
 | Large file sizes | Quality too high | Reduce `JPEG_QUALITY` to 90 or below |
 | Slow conversion | Using PIL (ImageConverter) | Use PyVipsImageConverter for faster processing |
 | "No EXIF data found" | Missing metadata | File will use current timestamp with `_noexif` suffix |
@@ -368,18 +379,119 @@ Supports timezone formats:
 
 **Images (using PyVipsImageConverter):**
 - HEIC to JPEG: ~100-200ms per image (faster than PIL)
-- PNG to JPEG: ~50-150ms per image (faster than PIL)
 - Batch of 50 photos: ~1-2 minutes
 - ICC profile processing overhead: negligible
 
 **Images (using ImageConverter - PIL):**
 - HEIC to JPEG: ~200-500ms per image
-- PNG to JPEG: ~100-300ms per image
 - Batch of 50 photos: ~2-3 minutes
 
 **Videos:**
 - MOV to MP4 (5 mins): ~30-60 seconds (depends on preset)
 - Batch of 3 videos (1 hour total): ~15-30 minutes
+
+---
+
+## 🔏 Metadata Stripper (format-preserving)
+
+`--no-convert` is a mode of the normal entry point that **renames files by capture date and strips
+identification metadata without converting formats**. Every file is copied to `files/converted/` with a standardised
+date-based filename and its original format preserved; ExifTool then removes the identifying fields from
+the copy. The original in `files/to_convert/` is never modified.
+
+### Prerequisites
+
+Requires **ExifTool** in addition to the standard dependencies:
+
+```bash
+# macOS
+brew install exiftool
+
+# Linux (Ubuntu/Debian)
+sudo apt install libimage-exiftool-perl
+```
+
+### Processing Flow (`--no-convert`)
+
+```
+                         Source File
+                              │
+             ┌────────────────┴────────────────┐
+             │                                 │
+           Image                             Video
+             │                                 │
+             ▼                                 ▼
+  ┌─────────────────────┐          ┌─────────────────────┐
+  │  Read EXIF date     │          │  Read date via      │
+  │  via PIL            │          │  ffprobe            │
+  └──────────┬──────────┘          └──────────┬──────────┘
+             │                                 │
+             ▼                                 ▼
+  ┌─────────────────────┐          ┌─────────────────────┐
+  │  Copy + rename to   │          │  Copy + rename to   │
+  │  IMG_ filename      │          │  VID_ filename      │
+  │  (original ext)     │          │  (original ext)     │
+  └──────────┬──────────┘          └──────────┬──────────┘
+             └─────────────────┬──────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │    HEIC / HEIF ?    │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┴────────────────┐
+              │                                 │
+             YES                                NO
+              │                                 │
+              ▼                                 ▼
+  ┌─────────────────────┐          ┌─────────────────────┐
+  │  ExifTool: -all=    │          │  ExifTool: strip    │
+  │  (full strip incl.  │          │  ID fields          │
+  │  Apple containers)  │          └──────────┬──────────┘
+  └──────────┬──────────┘                     │
+             └─────────────────┬──────────────┘
+                               │
+                               ▼
+                   ┌───────────────────────────┐
+                   │  Original format kept     │
+                   │  No identification        │
+                   │  metadata                 │
+                   └───────────────────────────┘
+```
+
+### Usage
+
+```bash
+poetry run python -m image_conversion.main --no-convert
+```
+
+### What it strips
+
+| Category | Fields removed |
+|----------|---------------|
+| Location | `GPSLatitude`, `GPSLongitude`, `GPSAltitude`, `GPSImgDirection`, `GPSSpeed`, `GPSTrack`, `GPSDateStamp`, `GPSTimeStamp`, `GPSDestLatitude`, `GPSDestLongitude`, `GPSCoordinates`, `GPSPosition`, `LocationCreated`, `City`, `Province-State`, `Country`, `Sub-location` |
+| Device identity | `Make`, `Model`, `SerialNumber`, `LensSerialNumber`, `LensMake`, `LensModel`, `OwnerName`, `CameraOwnerName` |
+| Timestamps | `DateTimeOriginal`, `CreateDate`, `ModifyDate`, `MediaCreateDate`, `MediaModifyDate`, `TrackCreateDate`, `TrackModifyDate`, `CreationTime` |
+| Person / identity | `Artist`, `Creator`, `Copyright`, `PersonInImage`, `By-line`, `Contact` |
+| Software trail | `Software`, `ProcessingSoftware`, `CreatorTool` |
+| Document lineage | `DocumentID`, `OriginalDocumentID`, `InstanceID`, `DerivedFrom` |
+| Device pairing | `MediaGroupUUID`, `ContentIdentifier`, `ImageUniqueID` |
+
+ExifTool clears each field across all metadata groups (EXIF, XMP, IPTC, QuickTime) in a single pass, so
+Apple-specific atoms in iPhone videos and proprietary maker-note tags are covered alongside standard EXIF.
+
+### Comparison with the default mode
+
+| | default | `--no-convert` |
+|---|---|---|
+| Output format | JPEG (images) / MP4 (videos) | Original format unchanged |
+| Filename | Standardized `IMG_` / `VID_` by date | Standardized `IMG_` / `VID_` by date |
+| JPG sources | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) |
+| MP4 sources | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) |
+| HEIC / other images | Converted to JPEG via PyVips | Renamed + ExifTool `-all=` strip |
+| MOV / other videos | Re-encoded to MP4 via FFmpeg | Renamed + ExifTool strip |
+| DNG / RAW | Converted to JPEG | Stripped in-place |
+
+---
 
 ## 🔐 Privacy & Security
 
@@ -464,7 +576,5 @@ ffprobe files/converted/VID_*.mp4
 **Recent Changes (v0.2.0):**
 - Added PyVipsImageConverter for high-performance image processing
 - Implemented ICC profile preservation for accurate color reproduction
-- Added Samsung image rename-only mode (`--samsung-rename` flag)
 - Improved JPEG quality settings (95 default with 4:4:4 chroma subsampling)
-- Added Samsung-specific gamma adjustment for HDR loss compensation
 - Enhanced color space handling with ICC transform to sRGB

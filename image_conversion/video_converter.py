@@ -11,10 +11,11 @@ from config import (
     VIDEO_PRESET,
     AUDIO_CODEC,
     AUDIO_BITRATE,
-    VIDEO_SKIP_REENCODE_MP4,
+    VIDEO_STREAM_COPY,
 )
 from exif_utils import get_video_datetime
 from filename_utils import FilenameManager
+from metadata_utils import strip_metadata
 
 
 class VideoConverter:
@@ -141,13 +142,48 @@ class VideoConverter:
         except (subprocess.CalledProcessError, ValueError):
             return "Unknown"
 
-    def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> None:
+    def _try_stream_copy(self, source_path: Path, destination_path: Path) -> bool:
+        """Remux the source into MP4 without re-encoding.
+
+        Args:
+            source_path: Path to the source video file
+            destination_path: Path to write the remuxed MP4 to
+
+        Returns:
+            True if the remux succeeded, False if the streams cannot live in an MP4
+            container (caller should fall back to a full re-encode)
+        """
+        command = [
+            "ffmpeg",
+            "-i",
+            str(source_path),
+            "-map_metadata",
+            "-1",  # Strip all metadata
+            "-c",
+            "copy",  # Stream copy — no decode/encode
+            "-movflags",
+            "+faststart",  # Enable streaming
+            "-y",  # Overwrite output file if exists
+            str(destination_path),
+        ]
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            # ffmpeg creates the output before it discovers the codec is unmuxable
+            destination_path.unlink(missing_ok=True)
+            return False
+        return True
+
+    def convert_to_mp4(self, source_path: Path, current: int = 0, total: int = 0) -> tuple[str, str | None]:
         """Convert any video format to MP4 with progress bar.
 
         Args:
             source_path: Path to the source video file
             current: Current file number (for progress display)
             total: Total number of files (for progress display)
+
+        Returns:
+            (action, error) where action is the label printed for this file and error is
+            the failure message, or None on success
         """
         try:
             # Get video metadata
@@ -164,21 +200,20 @@ class VideoConverter:
                 output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
             destination_path = DESTINATION_FOLDER / output_filename
 
-            # Skip re-encoding for MP4 sources when configured — just copy/rename
-            if VIDEO_SKIP_REENCODE_MP4 and source_path.suffix.lower() == ".mp4":
-                import shutil
-
-                shutil.copy2(source_path, destination_path)
-
+            # Try a lossless remux first — falls through to a re-encode if the codecs
+            # cannot be muxed into MP4 (e.g. PCM audio in a .mov, MJPEG in an .avi)
+            if VIDEO_STREAM_COPY and self._try_stream_copy(source_path, destination_path):
                 pad = self.max_name_len
                 total_w = len(str(total))
                 counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
-                if source_path.name != output_filename:
-                    src = source_path.name.ljust(pad)
-                    print(f"{counter_str}✓ Copied    {src} → {output_filename}")
-                else:
-                    print(f"{counter_str}✓ Copied    {source_path.name}")
-                return
+                src = source_path.name.ljust(pad)
+
+                if not strip_metadata(destination_path):
+                    print(f"{counter_str}✗ Failed    {src} → {output_filename} (remuxed; METADATA NOT STRIPPED)")
+                    return "Failed", "exiftool could not strip metadata"
+
+                print(f"{counter_str}✓ Remuxed   {src} → {output_filename}")
+                return "Remuxed", None
 
             # Get video duration for progress tracking
             duration = self._get_video_duration(source_path)
@@ -262,19 +297,24 @@ class VideoConverter:
             if process.returncode == 0:
                 src = source_path.name.ljust(pad)
                 print(f"{counter_str}✓ Converted {src} → {output_filename}")
-            else:
-                # Read any remaining stderr
-                if process.stderr:
-                    stderr = process.stderr.read()
-                    print(f"{counter_str}✗ Failed    {source_path.name}: {stderr}")
-                else:
-                    print(f"{counter_str}✗ Failed    {source_path.name}")
+                return "Converted", None
+
+            # Read any remaining stderr
+            if process.stderr:
+                stderr = process.stderr.read()
+                print(f"{counter_str}✗ Failed    {source_path.name}: {stderr}")
+                return "Failed", stderr
+
+            print(f"{counter_str}✗ Failed    {source_path.name}")
+            return "Failed", f"ffmpeg exited with code {process.returncode}"
 
         except subprocess.CalledProcessError as e:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             print(f"{counter_str}✗ Failed    {source_path.name}: {e.stderr}")
+            return "Failed", str(e.stderr)
         except Exception as e:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             print(f"{counter_str}✗ Failed    {source_path.name}: {e}")
+            return "Failed", str(e)

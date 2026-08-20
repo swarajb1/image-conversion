@@ -2,136 +2,126 @@
 
 from pathlib import Path
 import shutil
-import numpy as np
 import pyvips
-import rawpy  # RAW demosaicing and embedded preview extraction for DNG colour reference
+import rawpy  # RAW demosaicing for DNG
 from PIL import Image
 
-from config import DESTINATION_FOLDER, JPEG_QUALITY, RAW_EXTRACT_PREVIEW
-from exif_utils import get_image_datetime, is_samsung_device
+from config import (
+    DESTINATION_FOLDER,
+    HEIC_PASSTHROUGH,
+    JPEG_QUALITY,
+    RAW_HEIF_AUTO_BRIGHT,
+    RAW_HEIF_BITDEPTH,
+    RAW_HEIF_COMPRESSION,
+    RAW_HEIF_EFFORT,
+    RAW_HEIF_QUALITY,
+)
+from exif_utils import get_image_datetime
 from filename_utils import FilenameManager
-
-# RAW formats that use rawpy for proper white-balance-aware processing
-RAW_EXTENSIONS = {".dng"}
+from format_utils import HEIF, PNG, RAW, detect_kind
+from metadata_utils import strip_metadata
 
 
 class PyVipsImageConverter:
     """Handles image conversion to JPEG using pyvips for better performance."""
 
-    def __init__(self, filename_manager: FilenameManager, samsung_rename_only: bool = False, max_name_len: int = 0):
+    def __init__(self, filename_manager: FilenameManager, max_name_len: int = 0):
         """Initialize the pyvips image converter.
 
         Args:
             filename_manager: FilenameManager instance for handling filenames
-            samsung_rename_only: If True, Samsung images are only renamed, not converted
             max_name_len: Max source filename length used to align terminal output columns
         """
         self.filename_manager = filename_manager
-        self.samsung_rename_only = samsung_rename_only
         self.max_name_len = max_name_len
 
     @staticmethod
-    def _build_hist_lut(src_band: pyvips.Image, ref_band: pyvips.Image) -> np.ndarray:
-        """Build a uint8 LUT that maps src histogram to match ref histogram."""
-        src_data = np.frombuffer(src_band.write_to_memory(), dtype=np.uint8)
-        ref_data = np.frombuffer(ref_band.write_to_memory(), dtype=np.uint8)
+    def _output_ext(source_path: Path) -> str:
+        """Pick the output extension from the file's real format.
 
-        src_hist, _ = np.histogram(src_data, bins=256, range=(0, 256))
-        ref_hist, _ = np.histogram(ref_data, bins=256, range=(0, 256))
+        Detection lives here so the chosen filename and the branch that writes it can
+        never disagree: a file that is not really HEIF gets a .jpg name and takes the
+        normal encode path.
+        """
+        kind = detect_kind(source_path)
+        if HEIC_PASSTHROUGH and kind == HEIF:
+            return "heif"
+        if kind == RAW:
+            return "heif"
+        if kind == PNG:
+            # PNG is the one lossless input. Re-encoding it to JPEG throws that away,
+            # flattens any alpha onto white, and usually grows the file, because the
+            # PNGs in a photo library are screenshots and graphics, not photographs.
+            return "png"
+        return "jpg"
 
-        src_cdf = np.cumsum(src_hist, dtype=np.float64)
-        ref_cdf = np.cumsum(ref_hist, dtype=np.float64)
-        src_cdf /= src_cdf[-1]
-        ref_cdf /= ref_cdf[-1]
-
-        return np.searchsorted(ref_cdf, src_cdf).clip(0, 255).astype(np.uint8)
-
-    def _process_with_pyvips(
-        self, source_path: Path, is_samsung: bool, destination_path: Path, sequential: bool = True
-    ) -> None:
-        is_raw = source_path.suffix.lower() in RAW_EXTENSIONS
-
-        if is_raw:
+    def _process_with_pyvips(self, source_path: Path, destination_path: Path, sequential: bool = True) -> None:
+        if detect_kind(source_path) == RAW:
+            # Full demosaic at 16 bits, encoded to 10-bit HEIF. libvips maps the full
+            # ushort 0-65535 range into the target bit depth itself, so the array is
+            # handed over unscaled -- shifting it down to 0-1023 first would go black.
             with rawpy.imread(str(source_path)) as raw:
-                try:
-                    thumb = raw.extract_thumb()
-                except Exception:
-                    thumb = None
-
-                if RAW_EXTRACT_PREVIEW and thumb is not None:
-                    # Write the embedded camera-processed JPEG directly --
-                    # exact HDR+ colours, no re-encoding needed.
-                    destination_path.write_bytes(bytes(thumb.data))
-                    return
-
-                # Full RAW conversion: demosaic with camera white balance,
-                # then histogram-match colours to the embedded preview.
                 rgb = raw.postprocess(
+                    output_bps=16,
                     use_camera_wb=True,
                     output_color=rawpy.ColorSpace.sRGB,
-                    no_auto_bright=False,
+                    no_auto_bright=not RAW_HEIF_AUTO_BRIGHT,
                 )
 
             h, w, b = rgb.shape
-            full = pyvips.Image.new_from_memory(rgb.tobytes(), w, h, b, "uchar")
-            full = full.copy(interpretation="srgb")
+            img = pyvips.Image.new_from_memory(rgb.tobytes(), w, h, b, "ushort")
+            img = img.copy(interpretation="rgb16")
+            img.heifsave(
+                str(destination_path),
+                compression=RAW_HEIF_COMPRESSION,
+                Q=RAW_HEIF_QUALITY,
+                bitdepth=RAW_HEIF_BITDEPTH,
+                effort=RAW_HEIF_EFFORT,
+                subsample_mode="off",
+                strip=True,
+                profile="srgb",
+            )
+            return
 
-            if thumb is None:
-                img = full
-            else:
-                prev = pyvips.Image.new_from_buffer(bytes(thumb.data), "")
+        load_kwargs = {"access": "sequential"} if sequential else {}
+        img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
 
-                corrected = []
-                for ch in range(3):
-                    src_ch = full.extract_band(ch)
-                    ref_ch = prev.extract_band(ch)
-                    lut = self._build_hist_lut(src_ch, ref_ch)
-                    lut_img = pyvips.Image.new_from_memory(lut.tobytes(), 256, 1, 1, "uchar")
-                    corrected.append(src_ch.maplut(lut_img))
+        try:
+            if "orientation" in img.get_fields():
+                img = img.autorot()
+        except Exception:
+            pass
 
-                img = corrected[0].bandjoin(corrected[1:])
-                img = img.copy(interpretation="srgb")
-        else:
-            load_kwargs = {"access": "sequential"} if sequential else {}
-            img = pyvips.Image.new_from_file(str(source_path), **load_kwargs)
+        if img.bands == 4 and img.hasalpha():
+            img = img.flatten(background=[255, 255, 255])
 
-            try:
-                if "orientation" in img.get_fields():
-                    img = img.autorot()
-            except Exception:
-                pass
+        try:
+            img = img.icc_transform("srgb")
+        except Exception:
+            if img.interpretation != "srgb":
+                if img.bands >= 3:
+                    img = img.colourspace("srgb")
 
-            if img.bands == 4 and img.hasalpha():
-                img = img.flatten(background=[255, 255, 255])
-
-            try:
-                img = img.icc_transform("srgb")
-                if is_samsung:
-                    img = img.gamma(1.1)
-            except Exception:
-                if img.interpretation != "srgb":
-                    if img.bands >= 3:
-                        img = img.colourspace("srgb")
-
-        # Use maximum quality for RAW-derived images to avoid re-compression artefacts
-        # on top of what is already a lossy embedded JPEG.
-        quality = 100 if is_raw else JPEG_QUALITY
         img.jpegsave(
             str(destination_path),
-            Q=quality,
+            Q=JPEG_QUALITY,
             optimize_coding=True,
             strip=True,
             interlace=True,
             subsample_mode="off",
         )
 
-    def convert_to_jpeg(self, source_path: Path, current: int = 0, total: int = 0) -> None:
+    def convert_to_jpeg(self, source_path: Path, current: int = 0, total: int = 0) -> tuple[str, str | None]:
         """Convert any image format to JPEG with datetime-based filename using pyvips.
 
         Args:
             source_path: Path to the source image file
             current: Current file number (for progress display)
             total: Total number of files (for progress display)
+
+        Returns:
+            (action, error) where action is the label printed for this file and error is
+            the failure message, or None on success
         """
         try:
             # Get datetime from EXIF data using PIL (for compatibility with existing code)
@@ -139,14 +129,16 @@ class PyVipsImageConverter:
             with Image.open(source_path) as pil_img:
                 dt, datetime_display = get_image_datetime(pil_img)
 
-                # Check if image is from Samsung
-                is_samsung = is_samsung_device(pil_img)
-
             # Determine output filename
-            if self.filename_manager.is_valid_format(source_path.name):
+            # An already-standard name is kept only when it does not lie about the content:
+            # a PNG called IMG_<date>.jpg would otherwise be copied out under an extension
+            # that does not match its bytes.
+            ext = self._output_ext(source_path)
+            if self.filename_manager.is_valid_format(source_path.name) and source_path.suffix.lower() == f".{ext}":
                 new_filename = source_path.name
+                self.filename_manager.used_filenames.add(new_filename)
             else:
-                new_filename = self.filename_manager.determine_output_filename(source_path, dt)
+                new_filename = self.filename_manager.determine_output_filename(source_path, dt, ext)
 
             destination_path = DESTINATION_FOLDER / new_filename
 
@@ -154,38 +146,47 @@ class PyVipsImageConverter:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
 
-            # If Samsung rename-only mode is enabled and image is from Samsung, just copy/rename
-            if self.samsung_rename_only and is_samsung:
+            # A .heic file is already a valid HEIF container and a PNG is already lossless
+            # -- copy the bytes and rename, no decode or re-encode. _output_ext has already
+            # confirmed the format, so the name and the branch that writes it agree.
+            kind = detect_kind(source_path)
+            if (ext == "heif" and kind == HEIF) or (ext == "png" and kind == PNG):
                 shutil.copy2(source_path, destination_path)
-
-                if source_path.name != new_filename:
-                    src = source_path.name.ljust(pad)
-                    print(f"{counter_str}✓ Renamed   {src} → {new_filename} (Samsung, no conversion)")
-                else:
-                    print(f"{counter_str}✓ Copied    {source_path.name} (Samsung, no conversion)")
-                return
+                # There is no encoder on this path to apply strip=True, so the identification
+                # metadata every other output drops has to be removed explicitly. The pixels
+                # stay byte-identical; only the metadata boxes are rewritten.
+                label = kind.upper()
+                src = source_path.name.ljust(pad)
+                if not strip_metadata(destination_path):
+                    print(f"{counter_str}✗ Failed    {src} → {new_filename} ({label} copied; METADATA NOT STRIPPED)")
+                    return "Failed", "exiftool could not strip metadata"
+                print(f"{counter_str}✓ Passed    {src} → {new_filename} ({label}, no re-encode)")
+                return "Passed", None
 
             # Otherwise, proceed with full conversion
-            if source_path.suffix.lower() in RAW_EXTENSIONS:
+            if kind == RAW:
                 # RAW format loaders in libvips don't support sequential access
-                self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+                self._process_with_pyvips(source_path, destination_path, sequential=False)
             else:
                 try:
-                    self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=True)
+                    self._process_with_pyvips(source_path, destination_path, sequential=True)
                 except pyvips.Error as e:
                     if "out of order" in str(e).lower():
                         # Some JPEGs have non-sequential scan patterns; retry with full load into RAM
-                        self._process_with_pyvips(source_path, is_samsung, destination_path, sequential=False)
+                        self._process_with_pyvips(source_path, destination_path, sequential=False)
                     else:
                         raise
 
             if source_path.name != new_filename:
                 src = source_path.name.ljust(pad)
                 print(f"{counter_str}✓ Converted {src} → {new_filename}")
-            else:
-                print(f"{counter_str}✓ Processed {source_path.name} (already in correct format)")
+                return "Converted", None
+
+            print(f"{counter_str}✓ Processed {source_path.name} (already in correct format)")
+            return "Processed", None
 
         except Exception as e:
             total_w = len(str(total))
             counter_str = f"[{current:>{total_w}}/{total}] " if total > 0 else ""
             print(f"{counter_str}✗ Failed    {source_path.name}: {e}")
+            return "Failed", str(e)
