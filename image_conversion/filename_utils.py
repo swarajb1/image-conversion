@@ -66,7 +66,7 @@ class FilenameManager:
 
         # Handle duplicates by checking the set of already-used filenames for this run
         if filename in self.used_filenames:
-            counter = 1
+            counter = 2
             while f"{base_name}-{counter}.{ext}" in self.used_filenames:
                 counter += 1
             filename = f"{base_name}-{counter}.{ext}"
@@ -109,7 +109,7 @@ class FilenameManager:
 
         # Handle duplicates by checking the set of already-used filenames for this run
         if filename in self.used_filenames:
-            counter = 1
+            counter = 2
             while f"{base_name}-{counter}.{ext}" in self.used_filenames:
                 counter += 1
             filename = f"{base_name}-{counter}.{ext}"
