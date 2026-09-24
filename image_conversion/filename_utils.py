@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from config import FILENAME_PATTERN, DATETIME_ONLY_PATTERN, SOURCE_FOLDER
+from config import DATETIME_ONLY_PATTERN, DESTINATION_FOLDER, FILENAME_PATTERN, SOURCE_FOLDER
 
 
 def collect_files(extensions: list[str]) -> list[Path]:
@@ -20,8 +20,24 @@ class FilenameManager:
     """Manages filename generation and validation with duplicate tracking."""
 
     def __init__(self):
-        """Initialize the filename manager with an empty set of used filenames."""
-        self.used_filenames: set[str] = set()
+        """Initialize the filename manager, treating names already in the output folder as used."""
+        # Names already in the output folder count as taken, so a rerun never overwrites them.
+        existing = DESTINATION_FOLDER.iterdir() if DESTINATION_FOLDER.exists() else []
+        self.used_filenames: set[str] = {p.name for p in existing}
+
+    def claim(self, filename: str) -> str:
+        """Reserve *filename*, appending _2, _3, ... before the extension if it is already used.
+
+        Every output name must pass through here -- it is the only place that guarantees two
+        files never land in the output folder under the same name.
+        """
+        stem, dot, ext = filename.rpartition(".")
+        candidate, counter = filename, 2
+        while candidate in self.used_filenames:
+            candidate = f"{stem}_{counter}{dot}{ext}"
+            counter += 1
+        self.used_filenames.add(candidate)
+        return candidate
 
     def is_valid_format(self, filename: str) -> bool:
         """Check if filename follows IMG_<yyyymmdd>_<hhmmss>.jpg format.
@@ -62,18 +78,7 @@ class FilenameManager:
             # Fallback to timestamp-based name if no EXIF data
             base_name = f"IMG_{datetime.now().strftime('%Y%m%d_%H%M%S')}_noexif"
 
-        filename = f"{base_name}.{ext}"
-
-        # Handle duplicates by checking the set of already-used filenames for this run
-        if filename in self.used_filenames:
-            counter = 2
-            while f"{base_name}-{counter}.{ext}" in self.used_filenames:
-                counter += 1
-            filename = f"{base_name}-{counter}.{ext}"
-
-        # Record filename as used for this run
-        self.used_filenames.add(filename)
-        return filename
+        return self.claim(f"{base_name}.{ext}")
 
     def is_valid_video_format(self, filename: str) -> bool:
         """Check if filename follows VID_<yyyymmdd>_<hhmmss>.mp4 format.
@@ -105,18 +110,7 @@ class FilenameManager:
             # Fallback to timestamp-based name if no metadata
             base_name = f"VID_{datetime.now().strftime('%Y%m%d_%H%M%S')}_nometa"
 
-        filename = f"{base_name}.{ext}"
-
-        # Handle duplicates by checking the set of already-used filenames for this run
-        if filename in self.used_filenames:
-            counter = 2
-            while f"{base_name}-{counter}.{ext}" in self.used_filenames:
-                counter += 1
-            filename = f"{base_name}-{counter}.{ext}"
-
-        # Record filename as used for this run
-        self.used_filenames.add(filename)
-        return filename
+        return self.claim(f"{base_name}.{ext}")
 
     def determine_output_filename(self, source_path: Path, dt: datetime | None, ext: str = "jpg") -> str:
         """Determine the appropriate output filename based on source and format rules.
@@ -133,9 +127,7 @@ class FilenameManager:
         if self.is_datetime_only_format(source_path.name):
             # Add IMG_ prefix to the existing filename
             stem = source_path.stem  # e.g., "20251207_175000"
-            new_filename = f"IMG_{stem}.{ext}"
-            self.used_filenames.add(new_filename)
-            return new_filename
+            return self.claim(f"IMG_{stem}.{ext}")
 
         # Always generate new filename based on datetime metadata
         return self.generate_filename(dt, source_path.name, ext)
@@ -155,9 +147,7 @@ class FilenameManager:
         if self.is_datetime_only_format(source_path.name):
             # Add VID_ prefix to the existing filename
             stem = source_path.stem  # e.g., "20251207_175000"
-            new_filename = f"VID_{stem}.{ext}"
-            self.used_filenames.add(new_filename)
-            return new_filename
+            return self.claim(f"VID_{stem}.{ext}")
 
         # Always generate new filename based on datetime metadata
         return self.generate_video_filename(dt, source_path.name, ext)

@@ -35,7 +35,7 @@ A production-ready Python batch converter for images and videos with intelligent
   - Videos: `VID_YYYYMMDD_HHMMSS.mp4`
 - **Smart Naming**: Uses actual capture time from metadata (converted to IST if needed)
 - **Fallback Handling**: Uses current timestamp with `_noexif` or `_nometa` suffix if metadata unavailable
-- **Duplicate Prevention**: Appends `-1`, `-2`, etc. for files with identical timestamps
+- **Duplicate Prevention**: Appends `_2`, `_3`, etc. so no two output files share a name (names already in the output folder count)
 
 ## 🛠️ Prerequisites
 

@@ -135,8 +135,7 @@ class PyVipsImageConverter:
             # that does not match its bytes.
             ext = self._output_ext(source_path)
             if self.filename_manager.is_valid_format(source_path.name) and source_path.suffix.lower() == f".{ext}":
-                new_filename = source_path.name
-                self.filename_manager.used_filenames.add(new_filename)
+                new_filename = self.filename_manager.claim(source_path.name)
             else:
                 new_filename = self.filename_manager.determine_output_filename(source_path, dt, ext)
 

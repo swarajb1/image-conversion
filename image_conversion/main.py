@@ -38,8 +38,7 @@ def _image_output_name(source: Path, fm: FilenameManager) -> str:
     """
     ext = content_ext(source)
     if fm.is_valid_format(source.name) and source.suffix.lower() == f".{ext}":
-        fm.used_filenames.add(source.name)
-        return source.name
+        return fm.claim(source.name)
 
     try:
         with Image.open(source) as img:
@@ -54,8 +53,7 @@ def _video_output_name(source: Path, fm: FilenameManager) -> str:
     """Pick the output name for a video copied out as-is, by capture date."""
     ext = content_ext(source)
     if fm.is_valid_video_format(source.name) and source.suffix.lower() == f".{ext}":
-        fm.used_filenames.add(source.name)
-        return source.name
+        return fm.claim(source.name)
 
     dt, _ = get_video_datetime(source)
     return fm.determine_video_output_filename(source, dt, ext)

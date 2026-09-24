@@ -194,7 +194,7 @@ class VideoConverter:
             # Otherwise, generate a new filename based on datetime or convert datetime-only format
             if self.filename_manager.is_valid_video_format(source_path.name):
                 # Source already has correct format - keep the name, strip metadata
-                output_filename = source_path.name
+                output_filename = self.filename_manager.claim(source_path.name)
             else:
                 # Generate new filename based on datetime or convert datetime-only format
                 output_filename = self.filename_manager.determine_video_output_filename(source_path, dt)
