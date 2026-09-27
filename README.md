@@ -372,6 +372,7 @@ Supports timezone formats:
 | Video conversion fails | Unsupported codec | Verify source video integrity and format |
 | Slow video conversion | Preset too slow | Change `VIDEO_PRESET` to "fast" or "medium" |
 | "No files found" | Wrong source folder | Check `SOURCE_FOLDER` path in config.py |
+| Blank Finder icon on a passed-through HEIF | Finder cached the icon before ExifTool rewrote the file; the embedded thumbnail item is intact (`heif-info`, `qlmanage -t` both show it) | `qlmanage -r cache`, `qlmanage -r`, `killall Finder`; if still blank, `touch` the file ([details](docs/heif-finder-thumbnail.md)) |
 
 ## 📈 Performance
 
@@ -479,17 +480,29 @@ poetry run python -m image_conversion.main --no-convert
 ExifTool clears each field across all metadata groups (EXIF, XMP, IPTC, QuickTime) in a single pass, so
 Apple-specific atoms in iPhone videos and proprietary maker-note tags are covered alongside standard EXIF.
 
+### All-JPEG mode (`--all-jpg`)
+
+`--all-jpg` turns off the image passthroughs of the default mode: HEIC/HEIF, PNG and DNG are all encoded to
+JPEG, so every image output is a `.jpg` with metadata stripped by the encoder. Videos follow the default path.
+PNG transparency is flattened onto white. It cannot be combined with `--no-convert`.
+
+```bash
+make convert-jpg
+# or
+poetry run python image_conversion/main.py --all-jpg
+```
+
 ### Comparison with the default mode
 
-| | default | `--no-convert` |
-|---|---|---|
-| Output format | JPEG (images) / MP4 (videos) | Original format unchanged |
-| Filename | Standardized `IMG_` / `VID_` by date | Standardized `IMG_` / `VID_` by date |
-| JPG sources | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) |
-| MP4 sources | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) |
-| HEIC / other images | Converted to JPEG via PyVips | Renamed + ExifTool `-all=` strip |
-| MOV / other videos | Re-encoded to MP4 via FFmpeg | Renamed + ExifTool strip |
-| DNG / RAW | Converted to JPEG | Stripped in-place |
+| | default | `--no-convert` | `--all-jpg` |
+|---|---|---|---|
+| Output format | JPEG (images) / MP4 (videos) | Original format unchanged | JPEG (every image) / MP4 (videos) |
+| Filename | Standardized `IMG_` / `VID_` by date | Standardized `IMG_` / `VID_` by date | Standardized `IMG_` / `VID_` by date |
+| JPG sources | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) |
+| MP4 sources | Renamed + ExifTool strip (no re-encode) | Renamed + ExifTool strip (no re-encode) | Same as default |
+| HEIC / other images | Converted to JPEG via PyVips | Renamed + ExifTool `-all=` strip | Converted to JPEG via PyVips (HEIC and PNG included) |
+| MOV / other videos | Re-encoded to MP4 via FFmpeg | Renamed + ExifTool strip | Same as default |
+| DNG / RAW | Converted to JPEG | Stripped in-place | Demosaiced via rawpy, saved as 8-bit JPEG |
 
 ---
 

@@ -25,24 +25,27 @@ from metadata_utils import strip_metadata
 class PyVipsImageConverter:
     """Handles image conversion to JPEG using pyvips for better performance."""
 
-    def __init__(self, filename_manager: FilenameManager, max_name_len: int = 0):
+    def __init__(self, filename_manager: FilenameManager, max_name_len: int = 0, all_jpg: bool = False):
         """Initialize the pyvips image converter.
 
         Args:
             filename_manager: FilenameManager instance for handling filenames
             max_name_len: Max source filename length used to align terminal output columns
+            all_jpg: Encode every image to JPEG, disabling the HEIF/PNG passthroughs and DNG->HEIF
         """
         self.filename_manager = filename_manager
         self.max_name_len = max_name_len
+        self.all_jpg = all_jpg
 
-    @staticmethod
-    def _output_ext(source_path: Path) -> str:
+    def _output_ext(self, source_path: Path) -> str:
         """Pick the output extension from the file's real format.
 
         Detection lives here so the chosen filename and the branch that writes it can
         never disagree: a file that is not really HEIF gets a .jpg name and takes the
         normal encode path.
         """
+        if self.all_jpg:
+            return "jpg"
         kind = detect_kind(source_path)
         if HEIC_PASSTHROUGH and kind == HEIF:
             return "heif"
@@ -71,6 +74,9 @@ class PyVipsImageConverter:
             h, w, b = rgb.shape
             img = pyvips.Image.new_from_memory(rgb.tobytes(), w, h, b, "ushort")
             img = img.copy(interpretation="rgb16")
+            if self.all_jpg:
+                self._save_jpeg(img.colourspace("srgb"), destination_path)  # rgb16 -> 8-bit sRGB
+                return
             img.heifsave(
                 str(destination_path),
                 compression=RAW_HEIF_COMPRESSION,
@@ -102,6 +108,10 @@ class PyVipsImageConverter:
                 if img.bands >= 3:
                     img = img.colourspace("srgb")
 
+        self._save_jpeg(img, destination_path)
+
+    @staticmethod
+    def _save_jpeg(img: pyvips.Image, destination_path: Path) -> None:
         img.jpegsave(
             str(destination_path),
             Q=JPEG_QUALITY,
