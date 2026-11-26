@@ -53,13 +53,29 @@ class RunStats:
         total = total_images + total_videos
         failed = self.images["Failed"] + self.videos["Failed"]
 
-        width = max(len(str(total)), 2)
-        lines = ["=== Summary ==="]
+        rows = [("Type", "Count", "Breakdown")]
         if total_images:
-            lines.append(f"Images  {total_images:>{width}}   {self._breakdown(self.images)}")
+            rows.append(("Images", str(total_images), self._breakdown(self.images)))
         if total_videos:
-            lines.append(f"Videos  {total_videos:>{width}}   {self._breakdown(self.videos)}")
-        lines.append(f"Total   {total:>{width}}   ✓ {total - failed}   ✗ {failed}")
+            rows.append(("Videos", str(total_videos), self._breakdown(self.videos)))
+        rows.append(("Total", str(total), f"✓ {total - failed}   ✗ {failed}"))
+
+        type_w = max(len(r[0]) for r in rows)
+        count_w = max(len(r[1]) for r in rows)
+        breakdown_w = max(len(r[2]) for r in rows)
+
+        def border(left: str, mid: str, right: str) -> str:
+            return left + mid.join("─" * (w + 2) for w in (type_w, count_w, breakdown_w)) + right
+
+        def row(cols: tuple[str, str, str]) -> str:
+            type_col, count_col, breakdown_col = cols
+            return f"│ {type_col.ljust(type_w)} │ {count_col.rjust(count_w)} │ {breakdown_col.ljust(breakdown_w)} │"
+
+        lines = ["=== Summary ===", border("┌", "┬", "┐"), row(rows[0]), border("├", "┼", "┤")]
+        lines.extend(row(r) for r in rows[1:-1])
+        lines.append(border("├", "┼", "┤"))
+        lines.append(row(rows[-1]))
+        lines.append(border("└", "┴", "┘"))
         lines.append(f"Time    {_format_elapsed(elapsed)}")
 
         if self.failures:
@@ -86,9 +102,9 @@ if __name__ == "__main__":
     out = stats.render(3725.4)
     print(out)
 
-    assert "Images   5   Converted 2  Passed 1  Stripped 1  Failed 1" in out, out
-    assert "Videos   2   Remuxed 1  Failed 1" in out, out
-    assert "Total    7   ✓ 5   ✗ 2" in out, out
+    assert "│ Images │     5 │ Converted 2  Passed 1  Stripped 1  Failed 1 │" in out, out
+    assert "│ Videos │     2 │ Remuxed 1  Failed 1" in out, out
+    assert "│ Total  │     7 │ ✓ 5   ✗ 2" in out, out
     assert "Time    01:02:05" in out, out
     assert "Failed (2):" in out, out
     assert "broken.jpg  →  boom: bad header" in out, out

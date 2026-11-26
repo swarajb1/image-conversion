@@ -38,8 +38,7 @@ def _image_output_name(source: Path, fm: FilenameManager) -> str:
     """
     ext = content_ext(source)
     if fm.is_valid_format(source.name) and source.suffix.lower() == f".{ext}":
-        fm.used_filenames.add(source.name)
-        return source.name
+        return fm.claim(source.name)
 
     try:
         with Image.open(source) as img:
@@ -54,8 +53,7 @@ def _video_output_name(source: Path, fm: FilenameManager) -> str:
     """Pick the output name for a video copied out as-is, by capture date."""
     ext = content_ext(source)
     if fm.is_valid_video_format(source.name) and source.suffix.lower() == f".{ext}":
-        fm.used_filenames.add(source.name)
-        return source.name
+        return fm.claim(source.name)
 
     dt, _ = get_video_datetime(source)
     return fm.determine_video_output_filename(source, dt, ext)
@@ -103,6 +101,7 @@ def parse_arguments() -> argparse.Namespace:
             "Example usage:\n"
             "  python main.py                      # Convert all files\n"
             "  python main.py --no-convert         # Rename and strip only, keep every container\n"
+            "  python main.py --all-jpg            # Convert every image to JPEG, strip metadata\n"
             "  python main.py --help               # Show this help message"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -115,10 +114,17 @@ def parse_arguments() -> argparse.Namespace:
         help="Show program version",
     )
 
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--no-convert",
         action="store_true",
         help="Copy every file in its original container (HEIC stays HEIC, MOV stays MOV), renaming and stripping metadata only",
+    )
+
+    mode.add_argument(
+        "--all-jpg",
+        action="store_true",
+        help="Convert every image to JPEG (HEIF, PNG and DNG included) instead of passing them through",
     )
 
     args = parser.parse_args()
@@ -158,7 +164,7 @@ def main() -> None:
     # Process images
     if image_files:
         print("=== Processing Images ===")
-        image_converter = PyVipsImageConverter(filename_manager, max_name_len=max_name_len)
+        image_converter = PyVipsImageConverter(filename_manager, max_name_len=max_name_len, all_jpg=args.all_jpg)
         for idx, source_file in enumerate(image_files, 1):
             # Route on what the file is, not what it is named. Tools like Picasa rewrite
             # a DNG as JPEG while keeping the .dng name, which would otherwise reach rawpy.

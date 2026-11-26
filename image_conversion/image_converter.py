@@ -34,7 +34,7 @@ class ImageConverter:
 
                 # Determine output filename
                 if self.filename_manager.is_valid_format(source_path.name):
-                    new_filename = source_path.name
+                    new_filename = self.filename_manager.claim(source_path.name)
                 else:
                     new_filename = self.filename_manager.determine_output_filename(source_path, dt)
 
